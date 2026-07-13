@@ -1,0 +1,22 @@
+# Sesame5 UUID. Accepts dashed or non-dashed hex.
+sesame_id = "00000000-0000-0000-0000-000000000000"
+
+# Sesame5 OS3 secret key hex. This is the 16-byte device secret saved by the Sesame SDK/app.
+sesame_secret_key = "00000000000000000000000000000000"
+
+# Nature Remo Cloud API personal access token.
+nature_token = "replace-me"
+
+# Nature Remo signal ID for "light on".
+nature_light_on_signal_id = "replace-me"
+
+cooldown_seconds = 30
+
+# Safe default: do not remove local Sesame history records.
+# For continuous unattended operation this may need to be true.
+delete_history_after_read = false
+
+# Fill this after collecting history-dump samples.
+# [touch_pro_match]
+# contains_hex = ["replace-with-touch-pro-only-pattern"]
+

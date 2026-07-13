@@ -1,0 +1,23 @@
+[project]
+name = "sesame-remo"
+version = "0.1.0"
+description = "Turn on a Nature Remo light signal when Sesame Touch Pro unlock history is observed."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "bleak>=0.22",
+  "cryptography>=42",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.uv]
+package = false
