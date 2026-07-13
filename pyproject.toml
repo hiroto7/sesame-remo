@@ -1,7 +1,7 @@
 [project]
 name = "sesame-remo"
 version = "0.1.0"
-description = "Turn on a Nature Remo light signal when Sesame Touch Pro unlock history is observed."
+description = "Turn on a Nature Remo light when Sesame Touch Pro unlock history is observed."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
