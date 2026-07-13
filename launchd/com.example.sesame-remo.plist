@@ -14,12 +14,16 @@
     <string>--config</string>
     <string>/absolute/path/to/config.toml</string>
   </array>
+  <key>WorkingDirectory</key>
+  <string>/absolute/path/to/project</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
   <key>ProcessType</key>
   <string>Background</string>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
   <key>StandardOutPath</key>
   <string>/tmp/sesame-remo.out.log</string>
   <key>StandardErrorPath</key>

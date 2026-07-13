@@ -39,6 +39,19 @@ uv run sesame-remo history-dump --config config.toml --delete-after-read
 uv run sesame-remo daemon --config config.toml
 ```
 
+foregroundで動作確認した後は、`launchd/com.example.sesame-remo.plist` のPython、設定ファイル、作業ディレクトリ、ログの各パスを絶対パスに置き換え、`~/Library/LaunchAgents` へ配置するとログイン中に常駐できます。
+
+```bash
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.example.sesame-remo.plist
+launchctl kickstart -k "gui/$(id -u)/com.example.sesame-remo"
+```
+
+停止と登録解除は次のとおりです。
+
+```bash
+launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.example.sesame-remo.plist
+```
+
 ## Touch Pro 判定
 
 `touch_pro_match` が未設定の場合、daemon は誤って履歴を消費しないよう起動を拒否します。`history-dump` で採取した payload から、Touch Pro 由来にだけ出る byte pattern を設定してください。先頭4 byteの可変 record ID は判定対象から自動的に除外されます。
