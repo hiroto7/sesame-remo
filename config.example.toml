@@ -19,4 +19,6 @@ delete_history_after_read = false
 # Fill this after collecting history-dump samples.
 # [touch_pro_match]
 # Patterns are matched against the event body after the 4-byte record ID.
-# contains_hex = ["replace-with-touch-pro-only-pattern"]
+# For Sesame5 BLE unlock history, the final 16 bytes can be used as the
+# stable source tag after confirming it across multiple Touch Pro samples.
+# contains_hex = ["replace-with-32-hex-character-touch-pro-source-tag"]

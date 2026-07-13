@@ -43,9 +43,11 @@ uv run sesame-remo daemon --config config.toml
 
 `touch_pro_match` が未設定の場合、daemon は誤って履歴を消費しないよう起動を拒否します。`history-dump` で採取した payload から、Touch Pro 由来にだけ出る byte pattern を設定してください。先頭4 byteの可変 record ID は判定対象から自動的に除外されます。
 
+Sesame5 の BLE 解錠履歴では、末尾16 byteが操作元ごとに安定したsource tagとして観測できます。Touch Pro解錠を複数回採取して末尾16 byteが一致し、アプリ解錠では異なることを確認したうえで、その32桁のhexを設定します。手動解錠は別の履歴種別なので一致しません。
+
 ```toml
 [touch_pro_match]
-contains_hex = ["01020304"]
+contains_hex = ["replace-with-32-hex-character-touch-pro-source-tag"]
 ```
 
 daemon は Touch Pro パターンに一致し、かつ履歴種別が解錠のときだけ照明を送信します。`delete_history_after_read = true` が必須です。Sesame5 の履歴取得はキューの先頭を読む方式なので、削除しない限り同じレコードから進めません。Nature Remo 送信が失敗した場合は削除せず、次のループで再試行します。
