@@ -39,7 +39,11 @@ async def history_dump(
 async def daemon(config_path: str, scan_timeout: float, poll_interval: float) -> int:
     cfg = load_config(config_path)
     gate = EventGate(cfg.cooldown_seconds)
-    remo = NatureRemoClient(cfg.nature_token, cfg.nature_light_on_signal_id)
+    remo = NatureRemoClient(
+        cfg.nature_token,
+        cfg.nature_light_appliance_id,
+        cfg.nature_light_button,
+    )
     if not cfg.touch_pro_match.contains_hex and not cfg.touch_pro_match.prefix_hex:
         raise ValueError("touch_pro_match must be configured before starting daemon")
     if not cfg.delete_history_after_read:
@@ -49,12 +53,14 @@ async def daemon(config_path: str, scan_timeout: float, poll_interval: float) ->
     if not cfg.nature_token or cfg.nature_token == "replace-me":
         raise ValueError("nature_token must be configured before starting daemon")
     if (
-        not cfg.nature_light_on_signal_id
-        or cfg.nature_light_on_signal_id == "replace-me"
+        not cfg.nature_light_appliance_id
+        or cfg.nature_light_appliance_id == "replace-me"
     ):
         raise ValueError(
-            "nature_light_on_signal_id must be configured before starting daemon"
+            "nature_light_appliance_id must be configured before starting daemon"
         )
+    if not cfg.nature_light_button:
+        raise ValueError("nature_light_button must not be empty")
 
     while True:
         try:
@@ -71,7 +77,8 @@ async def daemon(config_path: str, scan_timeout: float, poll_interval: float) ->
                 await asyncio.to_thread(remo.send_light_on)
                 gate.mark_sent(record.record_id)
                 print(
-                    f"sent Nature Remo signal for record {record.record_id}", flush=True
+                    f"turned on Nature Remo light for record {record.record_id}",
+                    flush=True,
                 )
 
             await client.consume_history_once(

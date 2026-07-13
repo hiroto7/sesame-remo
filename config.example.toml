@@ -7,8 +7,9 @@ sesame_secret_key = "00000000000000000000000000000000"
 # Nature Remo Cloud API personal access token.
 nature_token = "replace-me"
 
-# Nature Remo signal ID for "light on".
-nature_light_on_signal_id = "replace-me"
+# Nature Remo LIGHT appliance ID and button name.
+nature_light_appliance_id = "replace-me"
+nature_light_button = "on"
 
 cooldown_seconds = 30
 

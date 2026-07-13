@@ -13,7 +13,7 @@ cp config.example.toml config.toml
 
 このプロジェクトは `.python-version` と `pyproject.toml` で Python 3.13 系に固定しています。
 
-`config.toml` の値はサンプルのままでは動きません。Sesame5 の UUID / 16-byte secret key と Nature Remo の token / signal id を入れます。`config.toml` は Git の管理対象外です。
+`config.toml` の値はサンプルのままでは動きません。Sesame5 の UUID / 16-byte secret key と Nature Remo の token / LIGHT appliance id を入れます。照明ONは `nature_light_button = "on"` を使います。`config.toml` は Git の管理対象外です。
 
 Sesame5 の UUID と secret key は、Sesame アプリで発行した owner または manager の共有リンクからローカルで取り出せます。共有リンク自体にも鍵が含まれるので、チャットなどへ貼らずクリップボードから直接渡してください。
 
@@ -50,6 +50,6 @@ Sesame5 の BLE 解錠履歴では、末尾16 byteが操作元ごとに安定し
 contains_hex = ["replace-with-32-hex-character-touch-pro-source-tag"]
 ```
 
-daemon は Touch Pro パターンに一致し、かつ履歴種別が解錠のときだけ照明を送信します。`delete_history_after_read = true` が必須です。Sesame5 の履歴取得はキューの先頭を読む方式なので、削除しない限り同じレコードから進めません。Nature Remo 送信が失敗した場合は削除せず、次のループで再試行します。
+daemon は Touch Pro パターンに一致し、かつ履歴種別が解錠のときだけ Nature Remo のLIGHT操作を送信します。`delete_history_after_read = true` が必須です。Sesame5 の履歴取得はキューの先頭を読む方式なので、削除しない限り同じレコードから進めません。Nature Remo 送信が失敗した場合は削除せず、次のループで再試行します。
 
 macOS で初回実行時に Bluetooth 利用許可が表示されたら、実行に使うターミナルを許可してください。タイムアウト時は UUID、Bluetooth 権限、距離、未取得履歴の有無を含むエラーを表示します。
