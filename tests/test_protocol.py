@@ -8,6 +8,7 @@ from sesame_remo.ble_protocol import (
     parse_plain_notify,
 )
 from sesame_remo.crypto import counter_bytes
+import pytest
 
 
 def test_command_payload_prefixes_item_code() -> None:
@@ -41,3 +42,8 @@ def test_parse_response_notify() -> None:
 def test_counter_bytes_matches_sdk_little_endian_long() -> None:
     assert counter_bytes(1) == b"\x01\x00\x00\x00\x00\x00\x00\x00"
 
+
+@pytest.mark.parametrize("payload", [b"", b"\x07", b"\x07\x04", b"\x08"])
+def test_parse_notify_rejects_truncated_payload(payload: bytes) -> None:
+    with pytest.raises(ValueError):
+        parse_plain_notify(payload)

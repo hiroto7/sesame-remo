@@ -3,9 +3,16 @@ from sesame_remo.history import HistoryRecord, is_touch_pro_history
 
 
 def test_history_record_uses_first_four_bytes_as_record_id() -> None:
-    record = HistoryRecord(bytes.fromhex("01020304aabbcc"))
+    record = HistoryRecord(bytes.fromhex("0102030402bbcc"))
     assert record.record_id == "01020304"
-    assert record.payload_hex == "01020304aabbcc"
+    assert record.payload_hex == "0102030402bbcc"
+    assert record.event_type == 2
+    assert record.is_unlock
+
+
+def test_history_record_recognizes_lock_event() -> None:
+    record = HistoryRecord(bytes.fromhex("0102030401bbcc"))
+    assert not record.is_unlock
 
 
 def test_touch_pro_match_requires_configured_pattern() -> None:
@@ -14,12 +21,22 @@ def test_touch_pro_match_requires_configured_pattern() -> None:
 
 def test_touch_pro_match_contains_all_patterns() -> None:
     matcher = TouchProMatch(contains_hex=("aabb", "eeff"))
-    assert is_touch_pro_history(bytes.fromhex("0011aabb22eeff"), matcher)
-    assert not is_touch_pro_history(bytes.fromhex("0011aabb22"), matcher)
+    assert is_touch_pro_history(bytes.fromhex("010203040011aabb22eeff"), matcher)
+    assert not is_touch_pro_history(bytes.fromhex("010203040011aabb22"), matcher)
 
 
 def test_touch_pro_match_prefix_and_contains() -> None:
     matcher = TouchProMatch(prefix_hex="0102", contains_hex=("aabb",))
-    assert is_touch_pro_history(bytes.fromhex("010233aabb"), matcher)
-    assert not is_touch_pro_history(bytes.fromhex("99010233aabb"), matcher)
+    assert is_touch_pro_history(bytes.fromhex("a1a2a3a4010233aabb"), matcher)
+    assert not is_touch_pro_history(bytes.fromhex("a1a2a3a499010233aabb"), matcher)
 
+
+def test_touch_pro_match_accepts_prefix_only() -> None:
+    matcher = TouchProMatch(prefix_hex="02aabb")
+    assert is_touch_pro_history(bytes.fromhex("a1a2a3a402aabbcc"), matcher)
+    assert not is_touch_pro_history(bytes.fromhex("a1a2a3a401aabbcc"), matcher)
+
+
+def test_touch_pro_match_ignores_record_id() -> None:
+    matcher = TouchProMatch(contains_hex=("aabb",))
+    assert not is_touch_pro_history(bytes.fromhex("aabb000100112233"), matcher)

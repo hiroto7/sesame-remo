@@ -39,6 +39,8 @@ class SesameBleReceiver:
         self._buffer = b""
 
     def feed(self, data: bytes) -> tuple[SegmentType, bytes] | None:
+        if not data:
+            raise ValueError("empty BLE segment")
         segment_flag = data[0]
         is_start = segment_flag & 1
         parsing_type = segment_flag >> 1
@@ -72,10 +74,16 @@ def command_payload(item_code: ItemCode, data: bytes = b"") -> bytes:
 
 
 def parse_plain_notify(plaintext: bytes) -> SesameResponse | SesamePublish:
+    if not plaintext:
+        raise ValueError("empty Sesame notification")
     op = plaintext[0]
     payload = plaintext[1:]
     if op == OpCode.RESPONSE:
+        if len(payload) < 2:
+            raise ValueError("truncated Sesame response")
         return SesameResponse(payload[0], payload[1], payload[2:])
     if op == OpCode.PUBLISH:
+        if not payload:
+            raise ValueError("truncated Sesame publish")
         return SesamePublish(payload[0], payload[1:])
     raise ValueError(f"unsupported notify opcode: 0x{op:02x}")

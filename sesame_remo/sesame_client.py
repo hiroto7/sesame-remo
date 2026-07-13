@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 import uuid
@@ -19,6 +20,7 @@ from .crypto import SesameOS3Cipher, aes_cmac
 from .history import HistoryRecord
 
 if TYPE_CHECKING:
+    from bleak import BleakClient
     from bleak.backends.device import BLEDevice
     from bleak.backends.scanner import AdvertisementData
 else:
@@ -30,6 +32,10 @@ SESAME_SERVICE_UUID = "0000fd81-0000-1000-8000-00805f9b34fb"
 SESAME_WRITE_UUID = "16860002-a5ae-9856-b6d3-dbb4c676993e"
 SESAME_NOTIFY_UUID = "16860003-a5ae-9856-b6d3-dbb4c676993e"
 SESAME5_PRODUCT_TYPES = {5, 7, 16}
+
+
+class SesameScanTimeout(TimeoutError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -46,9 +52,10 @@ def _normalize_uuid(value: str) -> uuid.UUID:
 
 
 def _manufacturer_payload(advertisement_data: AdvertisementData) -> bytes | None:
-    if not advertisement_data.manufacturer_data:
-        return None
-    return next(iter(advertisement_data.manufacturer_data.values()))
+    for payload in advertisement_data.manufacturer_data.values():
+        if len(payload) >= 19 and payload[0] in SESAME5_PRODUCT_TYPES:
+            return payload
+    return None
 
 
 def parse_sesame5_advertisement(
@@ -71,7 +78,9 @@ def parse_sesame5_advertisement(
 
 
 class SesameOS3Client:
-    def __init__(self, sesame_id: str, secret_key_hex: str, timeout: float = 15.0) -> None:
+    def __init__(
+        self, sesame_id: str, secret_key_hex: str, timeout: float = 15.0
+    ) -> None:
         self.sesame_id = _normalize_uuid(sesame_id)
         self.secret_key = bytes.fromhex(secret_key_hex)
         self.timeout = timeout
@@ -80,11 +89,19 @@ class SesameOS3Client:
         self._cipher: SesameOS3Cipher | None = None
         self._initial_token: asyncio.Future[bytes] | None = None
         self._responses: dict[int, asyncio.Future[SesameResponse]] = {}
+        self._fatal_error: BaseException | None = None
 
-    async def find(self, require_history: bool, scan_timeout: float = 10.0) -> SesameAdvertisement:
+        if len(self.secret_key) != 16:
+            raise ValueError("secret key must be exactly 16 bytes")
+
+    async def find(
+        self, require_history: bool, scan_timeout: float = 10.0
+    ) -> SesameAdvertisement:
         from bleak import BleakScanner
 
-        found: asyncio.Future[SesameAdvertisement] = asyncio.get_running_loop().create_future()
+        found: asyncio.Future[SesameAdvertisement] = (
+            asyncio.get_running_loop().create_future()
+        )
 
         def callback(device: BLEDevice, advertisement_data: AdvertisementData) -> None:
             if found.done():
@@ -96,64 +113,126 @@ class SesameOS3Client:
                 return
             found.set_result(parsed)
 
-        scanner = BleakScanner(callback)
+        scanner = BleakScanner(callback, service_uuids=[SESAME_SERVICE_UUID])
         await scanner.start()
         try:
-            return await asyncio.wait_for(found, timeout=scan_timeout)
+            try:
+                return await asyncio.wait_for(found, timeout=scan_timeout)
+            except TimeoutError as exc:
+                requirement = " with pending history" if require_history else ""
+                raise SesameScanTimeout(
+                    f"timed out after {scan_timeout:g}s waiting for Sesame5 "
+                    f"{self.sesame_id}{requirement}; check the UUID, Bluetooth permission, "
+                    "distance, and generate a new lock history event"
+                ) from exc
         finally:
             await scanner.stop()
 
     async def read_history_once(
         self, scan_timeout: float = 10.0, delete_after_read: bool = False
     ) -> HistoryRecord:
+        async def no_op(_record: HistoryRecord) -> None:
+            return None
+
+        return await self.consume_history_once(
+            no_op,
+            scan_timeout=scan_timeout,
+            delete_after_success=delete_after_read,
+        )
+
+    async def consume_history_once(
+        self,
+        handler: Callable[[HistoryRecord], Awaitable[None]],
+        *,
+        scan_timeout: float = 10.0,
+        delete_after_success: bool = True,
+    ) -> HistoryRecord:
+        """Read one history record and delete it only after handler succeeds."""
         from bleak import BleakClient
 
         adv = await self.find(require_history=True, scan_timeout=scan_timeout)
+        if not adv.is_registered:
+            raise RuntimeError("Sesame5 is not registered")
         async with BleakClient(adv.device, timeout=self.timeout) as client:
             self._client = client
             self._receiver = SesameBleReceiver()
             self._cipher = None
             self._initial_token = asyncio.get_running_loop().create_future()
             self._responses = {}
-            await client.start_notify(SESAME_NOTIFY_UUID, self._on_notify)
-            token = await asyncio.wait_for(self._initial_token, timeout=self.timeout)
-            session_auth = aes_cmac(self.secret_key, token)
-            self._cipher = SesameOS3Cipher(session_auth, token)
-            login_future = asyncio.get_running_loop().create_future()
-            self._responses[ItemCode.LOGIN.value] = login_future
-            await self._send_plain(ItemCode.LOGIN, session_auth[:4])
-            await asyncio.wait_for(login_future, timeout=self.timeout)
-            response = await self._send_cipher(ItemCode.HISTORY, b"\x01")
-            if response.result_code != 0:
-                raise RuntimeError(f"history command failed: result_code={response.result_code}")
-            record = HistoryRecord(response.payload)
-            if delete_after_read:
-                await self.delete_history(record.record_id)
-            return record
+            self._fatal_error = None
+            try:
+                await client.start_notify(SESAME_NOTIFY_UUID, self._on_notify)
+                token = await asyncio.wait_for(
+                    self._initial_token, timeout=self.timeout
+                )
+                if len(token) != 4:
+                    raise RuntimeError(f"unexpected Sesame token length: {len(token)}")
+                session_auth = aes_cmac(self.secret_key, token)
+                self._cipher = SesameOS3Cipher(session_auth, token)
+                login = await self._send_plain_with_response(
+                    ItemCode.LOGIN, session_auth[:4]
+                )
+                self._require_success(login, "login")
+                response = await self._send_cipher(ItemCode.HISTORY, b"\x01")
+                self._require_success(response, "history")
+                record = HistoryRecord(response.payload)
+                await handler(record)
+                if delete_after_success:
+                    await self.delete_history(record.record_id)
+                return record
+            finally:
+                self._client = None
 
     async def delete_history(self, record_id_hex: str) -> None:
-        response = await self._send_cipher(ItemCode.HISTORY_DELETE, bytes.fromhex(record_id_hex))
+        response = await self._send_cipher(
+            ItemCode.HISTORY_DELETE, bytes.fromhex(record_id_hex)
+        )
+        self._require_success(response, "history delete")
+
+    @staticmethod
+    def _require_success(response: SesameResponse, command: str) -> None:
         if response.result_code != 0:
-            raise RuntimeError(f"history delete failed: result_code={response.result_code}")
+            raise RuntimeError(f"{command} failed: result_code={response.result_code}")
 
-    async def _send_plain(self, item_code: ItemCode, data: bytes = b"") -> None:
+    async def _send_plain_with_response(
+        self, item_code: ItemCode, data: bytes = b""
+    ) -> SesameResponse:
+        future = self._new_response_future(item_code)
         await self._write_segmented(SegmentType.PLAIN, command_payload(item_code, data))
+        return await self._await_response(item_code, future)
 
-    async def _send_cipher(self, item_code: ItemCode, data: bytes = b"") -> SesameResponse:
+    async def _send_cipher(
+        self, item_code: ItemCode, data: bytes = b""
+    ) -> SesameResponse:
         if self._cipher is None:
             raise RuntimeError("not logged in")
         payload = self._cipher.encrypt(command_payload(item_code, data))
-        future = asyncio.get_running_loop().create_future()
-        self._responses[item_code.value] = future
+        future = self._new_response_future(item_code)
         await self._write_segmented(SegmentType.CIPHER, payload)
-        return await asyncio.wait_for(future, timeout=self.timeout)
+        return await self._await_response(item_code, future)
 
-    async def _wait_response(self, item_code: ItemCode) -> SesameResponse:
-        future = self._responses.get(item_code.value)
-        if future is None:
-            future = asyncio.get_running_loop().create_future()
-            self._responses[item_code.value] = future
-        return await asyncio.wait_for(future, timeout=self.timeout)
+    def _new_response_future(
+        self, item_code: ItemCode
+    ) -> asyncio.Future[SesameResponse]:
+        if self._fatal_error is not None:
+            raise RuntimeError("Sesame BLE protocol failed") from self._fatal_error
+        existing = self._responses.get(item_code.value)
+        if existing is not None and not existing.done():
+            raise RuntimeError(f"command already pending: item_code={item_code.value}")
+        future: asyncio.Future[SesameResponse] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._responses[item_code.value] = future
+        return future
+
+    async def _await_response(
+        self, item_code: ItemCode, future: asyncio.Future[SesameResponse]
+    ) -> SesameResponse:
+        try:
+            return await asyncio.wait_for(future, timeout=self.timeout)
+        finally:
+            if self._responses.get(item_code.value) is future:
+                self._responses.pop(item_code.value, None)
 
     async def _write_segmented(self, segment_type: SegmentType, payload: bytes) -> None:
         if self._client is None:
@@ -162,20 +241,35 @@ class SesameOS3Client:
             await self._client.write_gatt_char(SESAME_WRITE_UUID, chunk, response=False)
 
     def _on_notify(self, _sender: object, data: bytearray) -> None:
-        completed = self._receiver.feed(bytes(data))
-        if completed is None:
-            return
-        segment_type, payload = completed
-        if segment_type == SegmentType.CIPHER:
-            if self._cipher is None:
-                raise RuntimeError("received cipher payload before cipher setup")
-            payload = self._cipher.decrypt(payload)
-        parsed = parse_plain_notify(payload)
-        if isinstance(parsed, SesamePublish):
-            if parsed.item_code == ItemCode.INITIAL and self._initial_token and not self._initial_token.done():
-                self._initial_token.set_result(parsed.payload)
-            return
-        if isinstance(parsed, SesameResponse):
-            future = self._responses.get(parsed.item_code)
-            if future is not None and not future.done():
-                future.set_result(parsed)
+        try:
+            completed = self._receiver.feed(bytes(data))
+            if completed is None:
+                return
+            segment_type, payload = completed
+            if segment_type == SegmentType.CIPHER:
+                if self._cipher is None:
+                    raise RuntimeError("received cipher payload before cipher setup")
+                payload = self._cipher.decrypt(payload)
+            parsed = parse_plain_notify(payload)
+            if isinstance(parsed, SesamePublish):
+                if (
+                    parsed.item_code == ItemCode.INITIAL
+                    and self._initial_token
+                    and not self._initial_token.done()
+                ):
+                    self._initial_token.set_result(parsed.payload)
+                return
+            if isinstance(parsed, SesameResponse):
+                future = self._responses.get(parsed.item_code)
+                if future is not None and not future.done():
+                    future.set_result(parsed)
+        except Exception as exc:
+            self._fail_pending(exc)
+
+    def _fail_pending(self, exc: BaseException) -> None:
+        self._fatal_error = exc
+        if self._initial_token is not None and not self._initial_token.done():
+            self._initial_token.set_exception(exc)
+        for future in self._responses.values():
+            if not future.done():
+                future.set_exception(exc)

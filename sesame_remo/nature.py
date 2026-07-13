@@ -22,5 +22,6 @@ class NatureRemoClient:
                     raise RuntimeError(f"Nature Remo API returned HTTP {res.status}")
         except error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Nature Remo API returned HTTP {exc.code}: {body}") from exc
-
+            raise RuntimeError(
+                f"Nature Remo API returned HTTP {exc.code}: {body}"
+            ) from exc

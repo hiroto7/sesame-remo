@@ -39,4 +39,3 @@ class SesameOS3Cipher:
         nonce = counter_bytes(self.decrypt_counter) + self.salt
         self.decrypt_counter += 1
         return self._aes.decrypt(nonce, ciphertext, b"\x00")
-
