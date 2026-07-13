@@ -12,11 +12,11 @@ nature_light_on_signal_id = "replace-me"
 
 cooldown_seconds = 30
 
-# Safe default: do not remove local Sesame history records.
-# For continuous unattended operation this may need to be true.
+# Required for daemon. History dump can override this with --delete-after-read.
+# Deleting advances Sesame5's history queue but removes the record before the Sesame app can fetch it.
 delete_history_after_read = false
 
 # Fill this after collecting history-dump samples.
 # [touch_pro_match]
+# Patterns are matched against the event body after the 4-byte record ID.
 # contains_hex = ["replace-with-touch-pro-only-pattern"]
-
