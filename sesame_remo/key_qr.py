@@ -18,7 +18,8 @@ def decode_sesame5_share_url(url: str) -> SesameKey:
     if query.get("t") != ["sk"] or "sk" not in query:
         raise ValueError("input is not a Sesame key share URL")
     try:
-        payload = b64decode(query["sk"][0], validate=True)
+        # parse_qs follows form semantics and turns an unescaped '+' into a space.
+        payload = b64decode(query["sk"][0].replace(" ", "+"), validate=True)
     except ValueError as exc:
         raise ValueError("Sesame share key is not valid Base64") from exc
     if len(payload) != 39:
