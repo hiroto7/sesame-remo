@@ -178,6 +178,9 @@ class SesameOS3Client:
                 record = HistoryRecord(response.payload)
                 await handler(record)
                 if delete_after_success:
+                    # Sesame5 returns the same queue head until it is deleted.
+                    # This advances the queue, but the official app may no longer be
+                    # able to fetch this record. See README's design notes.
                     await self.delete_history(record.record_id)
                 return record
             finally:
