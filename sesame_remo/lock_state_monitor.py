@@ -27,6 +27,8 @@ async def run_lock_state_monitor(
         volume=volume,
         repeat_gap=repeat_gap,
     )
+    if not sound.sound_path.is_file():
+        raise FileNotFoundError(f"sound file not found: {sound.sound_path}")
     last_locked: bool | None = None
 
     def log_event(event: str, **fields: object) -> None:

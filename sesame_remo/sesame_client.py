@@ -246,9 +246,11 @@ class SesameOS3Client:
                         # A real BLE disconnect is replaced by the next advert.
                         connection_lost = True
                 finally:
-                    connection_active = False
-                    discard_queued_advertisements()
-                    await connection.__aexit__(None, None, None)
+                    try:
+                        await connection.__aexit__(None, None, None)
+                    finally:
+                        connection_active = False
+                        discard_queued_advertisements()
                 if connection_lost:
                     if connection_event_handler is not None:
                         await connection_event_handler("connection_lost")

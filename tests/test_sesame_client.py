@@ -178,6 +178,7 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
     current_connection = None
     scanner_callback = None
     status_count = 0
+    connection_devices: list[BLEDevice] = []
 
     class StopMonitor(Exception):
         pass
@@ -187,6 +188,8 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
             nonlocal connection_count, current_connection
             connection_count += 1
             current_connection = self
+            assert isinstance(_device, BLEDevice)
+            connection_devices.append(_device)
             self.is_connected = True
             self.callback = None
             self.peer_tx = SesameOS3Cipher(session_key, token)
@@ -195,6 +198,22 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
             return self
 
         async def __aexit__(self, *_args: object) -> None:
+            if connection_count == 1:
+                assert scanner_callback is not None
+                scanner_callback(
+                    BLEDevice("stale-address", "stale", details=None),
+                    AdvertisementData(
+                        local_name="Sesame",
+                        manufacturer_data={
+                            0x055A: bytes([5, 0, 1]) + client.sesame_id.bytes
+                        },
+                        service_data={},
+                        service_uuids=[],
+                        tx_power=None,
+                        rssi=-50,
+                        platform_data=(),
+                    ),
+                )
             return None
 
         async def start_notify(self, _uuid: str, callback) -> None:
@@ -246,7 +265,7 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
             assert scanner_callback is not None
             # This advertisement arrives while connected and must be ignored.
             scanner_callback(
-                BLEDevice("test-address", "Sesame", details=None),
+                BLEDevice("active-address", "active", details=None),
                 AdvertisementData(
                     local_name="Sesame",
                     manufacturer_data={
@@ -269,9 +288,9 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
         assert scanner_callback is not None
         # Only this advertisement, received after disconnection, may reconnect.
         scanner_callback(
-            BLEDevice("test-address", "Sesame", details=None),
+            BLEDevice("fresh-address", "fresh", details=None),
             AdvertisementData(
-                local_name="Sesame",
+                local_name="fresh",
                 manufacturer_data={0x055A: bytes([5, 0, 1]) + client.sesame_id.bytes},
                 service_data={},
                 service_uuids=[],
@@ -292,3 +311,4 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
         )
 
     assert connection_count == 2
+    assert connection_devices[1].name == "fresh"
