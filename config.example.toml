@@ -5,15 +5,17 @@ sesame_id = "00000000-0000-0000-0000-000000000000"
 sesame_secret_key = "00000000000000000000000000000000"
 
 # Nature Remo Cloud API personal access token.
+# Required only for touch-pro-trigger.
 nature_token = "replace-me"
 
 # Nature Remo LIGHT appliance ID and button name.
+# Required only for touch-pro-trigger.
 nature_light_appliance_id = "replace-me"
 nature_light_button = "on"
 
 cooldown_seconds = 30
 
-# Required for daemon. History dump can override this with --delete-after-read.
+# Required for touch-pro-trigger. History dump can override this with --delete-after-read.
 # Deleting advances Sesame5's history queue but removes the record before the Sesame app can fetch it.
 delete_history_after_read = false
 

@@ -49,3 +49,18 @@ nature_light_appliance_id = "appliance"
         assert "placeholder" in str(exc)
     else:
         raise AssertionError("placeholder Sesame ID was accepted")
+
+
+def test_load_config_allows_omitting_nature_settings(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        """
+sesame_id = "10000000-0000-0000-0000-000000000000"
+sesame_secret_key = "00112233445566778899aabbccddeeff"
+""".strip()
+    )
+
+    loaded = load_config(config)
+
+    assert loaded.nature_token == ""
+    assert loaded.nature_light_appliance_id == ""

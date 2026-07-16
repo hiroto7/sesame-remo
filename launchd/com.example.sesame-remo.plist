@@ -10,7 +10,7 @@
     <string>/absolute/path/to/.venv/bin/python</string>
     <string>-m</string>
     <string>sesame_remo</string>
-    <string>daemon</string>
+    <string>touch-pro-trigger</string>
     <string>--config</string>
     <string>/absolute/path/to/config.toml</string>
   </array>

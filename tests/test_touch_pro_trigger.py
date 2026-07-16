@@ -1,4 +1,4 @@
-from sesame_remo.daemon import EventGate
+from sesame_remo.touch_pro_trigger import EventGate
 
 
 def test_event_gate_blocks_duplicate_record_id() -> None:
