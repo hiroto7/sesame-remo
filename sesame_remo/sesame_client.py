@@ -159,6 +159,7 @@ class SesameOS3Client:
         *,
         scan_timeout: float = 10.0,
         connection_lost_handler: Callable[[], Awaitable[None]] | None = None,
+        connection_event_handler: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         """Keep scanning and reconnect when a Sesame advertisement is received."""
         from bleak import BleakScanner
@@ -180,6 +181,8 @@ class SesameOS3Client:
 
         scanner = BleakScanner(callback, service_uuids=[SESAME_SERVICE_UUID])
         await scanner.start()
+        if connection_event_handler is not None:
+            await connection_event_handler("scan_started")
         try:
             while True:
                 try:
@@ -187,6 +190,8 @@ class SesameOS3Client:
                         advertisements.get(), timeout=scan_timeout
                     )
                 except TimeoutError as exc:
+                    if connection_event_handler is not None:
+                        await connection_event_handler("scan_timeout")
                     raise SesameScanTimeout(
                         f"timed out after {scan_timeout:g}s waiting for Sesame5 "
                         f"{self.sesame_id}; check the UUID, Bluetooth permission, "
@@ -197,22 +202,31 @@ class SesameOS3Client:
                     scan_timeout=scan_timeout,
                     advertisement=advertisement,
                 )
+                if connection_event_handler is not None:
+                    await connection_event_handler("advertisement_received")
+                    await connection_event_handler("connection_attempt")
                 try:
                     await connection.__aenter__()
                 except Exception:
                     # Keep the scanner alive. The next advertisement is the
                     # reconnect trigger, just like the official SDKs.
+                    if connection_event_handler is not None:
+                        await connection_event_handler("connection_failed")
                     if connection_lost_handler is not None:
                         await connection_lost_handler()
                     continue
 
                 try:
+                    if connection_event_handler is not None:
+                        await connection_event_handler("connected")
                     queue = self._require_status_queue()
                     try:
                         while True:
                             await handler(await self._next_status(queue))
                     except SesameScanTimeout:
                         # A stale connection is replaced by the next advert.
+                        if connection_event_handler is not None:
+                            await connection_event_handler("connection_lost")
                         if connection_lost_handler is not None:
                             await connection_lost_handler()
                         pass
@@ -220,6 +234,8 @@ class SesameOS3Client:
                     await connection.__aexit__(None, None, None)
         finally:
             await scanner.stop()
+            if connection_event_handler is not None:
+                await connection_event_handler("scan_stopped")
 
     @asynccontextmanager
     async def _logged_in(
