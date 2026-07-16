@@ -85,6 +85,8 @@ uv run sesame-remo status-dump --config config.toml
 
 Macの内蔵音を解錠中だけループ再生する場合は、次を実行します。デフォルトでは`/System/Library/Sounds/Ping.aiff`を小さな音量で再生します。Sesame5へのBLE接続は維持し、`mechStatus` publish通知を受けて状態を更新します。施錠、BLE接続失敗、状態不明のいずれでも音は停止します。
 
+この状態監視方式と、公式Android/iOS SDKのBLE広告・再接続処理を比較した調査メモは[docs/official-sdk-ble-reconnect.md](docs/official-sdk-ble-reconnect.md)にあります。
+
 ```bash
 uv run sesame-remo status-daemon --config config.toml
 ```

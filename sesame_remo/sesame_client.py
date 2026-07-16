@@ -158,18 +158,81 @@ class SesameOS3Client:
         handler: Callable[[Sesame5MechanismStatus], Awaitable[None]],
         *,
         scan_timeout: float = 10.0,
+        connection_lost_handler: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
-        """Keep one BLE connection and deliver mechStatus publishes."""
-        async with self._logged_in(scan_timeout=scan_timeout):
-            queue = self._require_status_queue()
+        """Keep scanning and reconnect when a Sesame advertisement is received."""
+        from bleak import BleakScanner
+
+        advertisements: asyncio.Queue[SesameAdvertisement] = asyncio.Queue(maxsize=1)
+
+        def callback(device: BLEDevice, advertisement_data: AdvertisementData) -> None:
+            parsed = parse_sesame5_advertisement(device, advertisement_data)
+            if (
+                parsed is None
+                or parsed.device_id != self.sesame_id
+                or not parsed.is_registered
+            ):
+                return
+            try:
+                advertisements.put_nowait(parsed)
+            except asyncio.QueueFull:
+                pass
+
+        scanner = BleakScanner(callback, service_uuids=[SESAME_SERVICE_UUID])
+        await scanner.start()
+        try:
             while True:
-                await handler(await self._next_status(queue))
+                try:
+                    advertisement = await asyncio.wait_for(
+                        advertisements.get(), timeout=scan_timeout
+                    )
+                except TimeoutError as exc:
+                    raise SesameScanTimeout(
+                        f"timed out after {scan_timeout:g}s waiting for Sesame5 "
+                        f"{self.sesame_id}; check the UUID, Bluetooth permission, "
+                        "and distance"
+                    ) from exc
+
+                connection = self._logged_in(
+                    scan_timeout=scan_timeout,
+                    advertisement=advertisement,
+                )
+                try:
+                    await connection.__aenter__()
+                except Exception:
+                    # Keep the scanner alive. The next advertisement is the
+                    # reconnect trigger, just like the official SDKs.
+                    if connection_lost_handler is not None:
+                        await connection_lost_handler()
+                    continue
+
+                try:
+                    queue = self._require_status_queue()
+                    try:
+                        while True:
+                            await handler(await self._next_status(queue))
+                    except SesameScanTimeout:
+                        # A stale connection is replaced by the next advert.
+                        if connection_lost_handler is not None:
+                            await connection_lost_handler()
+                        pass
+                finally:
+                    await connection.__aexit__(None, None, None)
+        finally:
+            await scanner.stop()
 
     @asynccontextmanager
-    async def _logged_in(self, *, scan_timeout: float) -> AsyncIterator[None]:
+    async def _logged_in(
+        self,
+        *,
+        scan_timeout: float,
+        advertisement: SesameAdvertisement | None = None,
+    ) -> AsyncIterator[None]:
         from bleak import BleakClient
 
-        adv = await self.find(require_history=False, scan_timeout=scan_timeout)
+        adv = advertisement or await self.find(
+            require_history=False, scan_timeout=scan_timeout
+        )
         if not adv.is_registered:
             raise RuntimeError("Sesame5 is not registered")
         async with BleakClient(adv.device, timeout=self.timeout) as client:

@@ -40,6 +40,7 @@ async def run_status_daemon(
                 await client.monitor_status(
                     handle_status,
                     scan_timeout=scan_timeout,
+                    connection_lost_handler=sound.stop,
                 )
             except SesameScanTimeout:
                 await sound.stop()

@@ -209,17 +209,33 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
 
     client = SesameOS3Client(str(uuid.uuid4()), secret.hex())
 
-    async def fake_find(*, require_history: bool, scan_timeout: float):
-        assert not require_history
-        assert scan_timeout == 1
-        return SimpleNamespace(device=object(), is_registered=True)
+    class FakeBleakScanner:
+        def __init__(self, callback, service_uuids) -> None:
+            self.callback = callback
+
+        async def start(self) -> None:
+            device = BLEDevice("test-address", "Sesame", details=None)
+            payload = bytes([5, 0, 1]) + client.sesame_id.bytes
+            advertisement = AdvertisementData(
+                local_name="Sesame",
+                manufacturer_data={0x055A: payload},
+                service_data={},
+                service_uuids=[],
+                tx_power=None,
+                rssi=-50,
+                platform_data=(),
+            )
+            self.callback(device, advertisement)
+
+        async def stop(self) -> None:
+            return None
 
     async def handler(status) -> None:
         assert status.is_unlocked
         raise StopMonitor
 
     monkeypatch.setattr("bleak.BleakClient", FakeBleakClient)
-    monkeypatch.setattr(client, "find", fake_find)
+    monkeypatch.setattr("bleak.BleakScanner", FakeBleakScanner)
 
     with pytest.raises(StopMonitor):
         await client.monitor_status(handler, scan_timeout=1)
