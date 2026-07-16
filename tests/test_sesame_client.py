@@ -183,6 +183,7 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
         def __init__(self, _device: object, timeout: float) -> None:
             nonlocal connection_count
             connection_count += 1
+            self.is_connected = True
             self.callback = None
             self.peer_tx = SesameOS3Cipher(session_key, token)
 

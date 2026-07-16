@@ -40,6 +40,10 @@ class SesameScanTimeout(TimeoutError):
     pass
 
 
+class SesameConnectionLost(ConnectionError):
+    pass
+
+
 @dataclass(frozen=True)
 class SesameAdvertisement:
     device: BLEDevice
@@ -222,9 +226,11 @@ class SesameOS3Client:
                     queue = self._require_status_queue()
                     try:
                         while True:
-                            await handler(await self._next_status(queue))
-                    except SesameScanTimeout:
-                        # A stale connection is replaced by the next advert.
+                            await handler(
+                                await self._next_status_until_disconnected(queue)
+                            )
+                    except SesameConnectionLost:
+                        # A real BLE disconnect is replaced by the next advert.
                         if connection_event_handler is not None:
                             await connection_event_handler("connection_lost")
                         if connection_lost_handler is not None:
@@ -286,6 +292,18 @@ class SesameOS3Client:
             raise SesameScanTimeout(
                 f"timed out after {self.timeout:g}s waiting for Sesame5 mechStatus"
             ) from exc
+
+    async def _next_status_until_disconnected(
+        self, queue: asyncio.Queue[Sesame5MechanismStatus]
+    ) -> Sesame5MechanismStatus:
+        while True:
+            client = self._client
+            if client is None or not client.is_connected:
+                raise SesameConnectionLost("Sesame BLE connection was lost")
+            try:
+                return await asyncio.wait_for(queue.get(), timeout=1.0)
+            except TimeoutError:
+                continue
 
     def _require_status_queue(self) -> asyncio.Queue[Sesame5MechanismStatus]:
         if self._mechanism_status_queue is None:
