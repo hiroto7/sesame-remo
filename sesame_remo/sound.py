@@ -53,21 +53,22 @@ class MacSoundLoop:
     async def _run(self) -> None:
         try:
             while True:
-                self._process = await asyncio.create_subprocess_exec(
+                process = await asyncio.create_subprocess_exec(
                     "/usr/bin/afplay",
                     "-v",
                     str(self.volume),
                     str(self.sound_path),
                 )
+                self._process = process
                 try:
-                    await self._process.wait()
+                    await process.wait()
                 finally:
-                    self._process = None
+                    if process.returncode is None:
+                        process.terminate()
+                        with suppress(ProcessLookupError):
+                            await process.wait()
+                    if self._process is process:
+                        self._process = None
                 await asyncio.sleep(self.repeat_gap)
         except asyncio.CancelledError:
-            process = self._process
-            if process is not None and process.returncode is None:
-                process.terminate()
-                with suppress(ProcessLookupError):
-                    await process.wait()
             raise
