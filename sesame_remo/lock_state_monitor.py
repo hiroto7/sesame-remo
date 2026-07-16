@@ -4,10 +4,18 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import sys
+from collections.abc import Awaitable, Callable
 
 from .config import Config
+from .history import HistoryRecord
 from .sesame_client import SesameOS3Client, SesameScanTimeout
 from .sound import MacSoundLoop
+from .status import Sesame5MechanismStatus
+
+
+HistoryHandler = Callable[[HistoryRecord], Awaitable[None]]
+HistoryEventHandler = Callable[[str, dict[str, object] | None], Awaitable[None]]
+StatusHandler = Callable[[Sesame5MechanismStatus], Awaitable[None]]
 
 
 async def run_lock_state_monitor(
@@ -18,6 +26,9 @@ async def run_lock_state_monitor(
     sound_path: str,
     volume: float,
     repeat_gap: float,
+    history_handler: HistoryHandler | None = None,
+    history_event_handler: HistoryEventHandler | None = None,
+    status_event_handler: StatusHandler | None = None,
 ) -> int:
     if poll_interval < 0.0:
         raise ValueError("poll_interval must not be negative")
@@ -70,12 +81,16 @@ async def run_lock_state_monitor(
                         await sound.start()
                     else:
                         await sound.stop()
+                    if status_event_handler is not None:
+                        await status_event_handler(status)
 
                 await client.monitor_status(
                     handle_status,
                     scan_timeout=scan_timeout,
                     connection_lost_handler=sound.stop,
                     connection_event_handler=handle_connection_event,
+                    history_handler=history_handler,
+                    history_event_handler=history_event_handler,
                 )
             except SesameScanTimeout:
                 await sound.stop()

@@ -7,3 +7,11 @@ def test_lock_state_monitor_parser_defaults() -> None:
     assert args.command == "lock-state-monitor"
     assert args.volume == 0.25
     assert args.repeat_gap == 1.0
+
+
+def test_combined_monitor_parser_defaults() -> None:
+    args = build_parser().parse_args(["combined-monitor", "--config", "config.toml"])
+
+    assert args.command == "combined-monitor"
+    assert args.volume == 0.25
+    assert args.repeat_gap == 1.0
