@@ -171,15 +171,12 @@ class SesameOS3Client:
         connection_event_handler: Callable[[str], Awaitable[None]] | None = None,
         history_handler: Callable[[HistoryRecord], Awaitable[None]] | None = None,
         history_event_handler: MonitorEventHandler | None = None,
-        history_poll_interval: float = 2.0,
     ) -> None:
         """Keep scanning and reconnect when a Sesame advertisement is received."""
         from bleak import BleakScanner
 
-        if history_poll_interval < 0.0:
-            raise ValueError("history_poll_interval must not be negative")
-
         advertisements: asyncio.Queue[SesameAdvertisement] = asyncio.Queue(maxsize=1)
+        history_available: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         connection_active = False
 
         def discard_queued_advertisements() -> None:
@@ -190,14 +187,19 @@ class SesameOS3Client:
                     return
 
         def callback(device: BLEDevice, advertisement_data: AdvertisementData) -> None:
-            if connection_active:
-                return
             parsed = parse_sesame5_advertisement(device, advertisement_data)
             if (
                 parsed is None
                 or parsed.device_id != self.sesame_id
                 or not parsed.is_registered
             ):
+                return
+            if parsed.has_history:
+                try:
+                    history_available.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
+            if connection_active:
                 return
             try:
                 advertisements.put_nowait(parsed)
@@ -253,7 +255,7 @@ class SesameOS3Client:
                             self._poll_history_current_connection(
                                 history_handler,
                                 event_handler=history_event_handler,
-                                poll_interval=history_poll_interval,
+                                history_available=history_available,
                             )
                         )
                     queue = self._require_status_queue()
@@ -359,15 +361,16 @@ class SesameOS3Client:
         handler: Callable[[HistoryRecord], Awaitable[None]],
         *,
         event_handler: MonitorEventHandler | None,
-        poll_interval: float,
+        history_available: asyncio.Queue[None],
     ) -> None:
         while True:
+            await history_available.get()
             record = await self.read_history_current_connection(
                 handler,
                 event_handler=event_handler,
             )
             if record is None:
-                await asyncio.sleep(poll_interval)
+                continue
 
     async def read_history_current_connection(
         self,

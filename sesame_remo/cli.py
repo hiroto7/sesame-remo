@@ -199,7 +199,6 @@ async def touch_pro_trigger(
                 scan_timeout=scan_timeout,
                 history_handler=handle,
                 history_event_handler=log_event,
-                history_poll_interval=poll_interval,
             )
         except SesameScanTimeout as exc:
             await log_event("cycle_timeout", {"error": str(exc)})
