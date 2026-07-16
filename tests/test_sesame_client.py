@@ -47,6 +47,7 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
     session_key = aes_cmac(secret, token)
     history_payload = bytes.fromhex("1122334402aabb")
     events: list[str] = []
+    monitor_events: list[str] = []
 
     class FakeBleakClient:
         def __init__(self, _device: object, timeout: float) -> None:
@@ -93,20 +94,39 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
     async def fake_find(*, require_history: bool, scan_timeout: float):
         assert require_history
         assert scan_timeout == 1
-        return SimpleNamespace(device=object(), is_registered=True)
+        return SimpleNamespace(
+            device=object(),
+            has_history=True,
+            is_registered=True,
+            product_type=5,
+        )
 
     async def handler(record) -> None:
         events.append("handler")
         assert record.payload == history_payload
 
+    async def event_handler(event: str, _fields: dict[str, object]) -> None:
+        monitor_events.append(event)
+
     monkeypatch.setattr("bleak.BleakClient", FakeBleakClient)
     monkeypatch.setattr(client, "find", fake_find)
 
     await client.consume_history_once(
-        handler, scan_timeout=1, delete_after_success=True
+        handler,
+        scan_timeout=1,
+        delete_after_success=True,
+        event_handler=event_handler,
     )
 
     assert events == ["handler", "delete"]
+    assert monitor_events == [
+        "advertisement_received",
+        "connection_attempt",
+        "connected",
+        "history_requested",
+        "history_received",
+        "history_deleted",
+    ]
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime, timezone
+import json
 import sys
+import time
 
 from .config import load_config
 from .touch_pro_trigger import EventGate
@@ -99,19 +102,64 @@ async def touch_pro_trigger(
     if not cfg.nature_light_button:
         raise ValueError("nature_light_button must not be empty")
 
+    cycle = 0
     while True:
+        cycle += 1
+        cycle_started_at = time.monotonic()
+
+        async def log_event(
+            event: str, fields: dict[str, object] | None = None
+        ) -> None:
+            print(
+                json.dumps(
+                    {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "event": event,
+                        "cycle": cycle,
+                        "elapsed_seconds": time.monotonic() - cycle_started_at,
+                        **(fields or {}),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
         try:
+            await log_event("cycle_started")
             client = SesameOS3Client(cfg.sesame_id, cfg.sesame_secret_key)
 
             async def handle(record: HistoryRecord) -> None:
                 print(record.to_json_line(), flush=True)
                 if not record.is_unlock:
                     return
-                if not is_touch_pro_history(record.payload, cfg.touch_pro_match):
+                matched = is_touch_pro_history(record.payload, cfg.touch_pro_match)
+                await log_event(
+                    "touch_pro_evaluated",
+                    {"record_id": record.record_id, "matched": matched},
+                )
+                if not matched:
                     return
                 if not gate.can_send(record.record_id):
                     return
-                await asyncio.to_thread(remo.send_light_on)
+                await log_event(
+                    "touch_pro_matched",
+                    {"record_id": record.record_id},
+                )
+                await log_event(
+                    "nature_request_started", {"record_id": record.record_id}
+                )
+                try:
+                    await asyncio.to_thread(remo.send_light_on)
+                except Exception:
+                    await log_event(
+                        "nature_request_completed",
+                        {"record_id": record.record_id, "success": False},
+                    )
+                    raise
+                await log_event(
+                    "nature_request_completed",
+                    {"record_id": record.record_id, "success": True},
+                )
                 gate.mark_sent(record.record_id)
                 print(
                     f"turned on Nature Remo light for record {record.record_id}",
@@ -122,11 +170,15 @@ async def touch_pro_trigger(
                 handle,
                 scan_timeout=scan_timeout,
                 delete_after_success=True,
+                event_handler=log_event,
             )
-        except SesameScanTimeout:
-            pass
+        except SesameScanTimeout as exc:
+            await log_event("cycle_timeout", {"error": str(exc)})
         except Exception as exc:
+            await log_event("cycle_failed", {"error": str(exc)})
             print(f"touch-pro-trigger error: {exc}", file=sys.stderr, flush=True)
+        finally:
+            await log_event("cycle_finished")
         await asyncio.sleep(poll_interval)
 
 

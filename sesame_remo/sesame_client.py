@@ -44,6 +44,9 @@ class SesameConnectionLost(ConnectionError):
     pass
 
 
+MonitorEventHandler = Callable[[str, dict[str, object]], Awaitable[None]]
+
+
 @dataclass(frozen=True)
 class SesameAdvertisement:
     device: BLEDevice
@@ -334,13 +337,21 @@ class SesameOS3Client:
         *,
         scan_timeout: float = 10.0,
         delete_after_success: bool = True,
+        event_handler: MonitorEventHandler | None = None,
     ) -> HistoryRecord:
         """Read one history record and delete it only after handler succeeds."""
         from bleak import BleakClient
 
         adv = await self.find(require_history=True, scan_timeout=scan_timeout)
+        if event_handler is not None:
+            await event_handler(
+                "advertisement_received",
+                {"has_history": adv.has_history, "product_type": adv.product_type},
+            )
         if not adv.is_registered:
             raise RuntimeError("Sesame5 is not registered")
+        if event_handler is not None:
+            await event_handler("connection_attempt", {})
         async with BleakClient(adv.device, timeout=self.timeout) as client:
             self._client = client
             self._receiver = SesameBleReceiver()
@@ -349,6 +360,8 @@ class SesameOS3Client:
             self._responses = {}
             self._fatal_error = None
             try:
+                if event_handler is not None:
+                    await event_handler("connected", {})
                 await client.start_notify(SESAME_NOTIFY_UUID, self._on_notify)
                 token = await asyncio.wait_for(
                     self._initial_token, timeout=self.timeout
@@ -361,15 +374,30 @@ class SesameOS3Client:
                     ItemCode.LOGIN, session_auth[:4]
                 )
                 self._require_success(login, "login")
+                if event_handler is not None:
+                    await event_handler("history_requested", {})
                 response = await self._send_cipher(ItemCode.HISTORY, b"\x01")
                 self._require_success(response, "history")
                 record = HistoryRecord(response.payload)
+                if event_handler is not None:
+                    await event_handler(
+                        "history_received",
+                        {
+                            "record_id": record.record_id,
+                            "event_type": record.event_type,
+                            "is_unlock": record.is_unlock,
+                        },
+                    )
                 await handler(record)
                 if delete_after_success:
                     # Sesame5 returns the same queue head until it is deleted.
                     # This advances the queue, but the official app may no longer be
                     # able to fetch this record. See README's design notes.
                     await self.delete_history(record.record_id)
+                    if event_handler is not None:
+                        await event_handler(
+                            "history_deleted", {"record_id": record.record_id}
+                        )
                 return record
             finally:
                 self._client = None
