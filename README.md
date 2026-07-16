@@ -95,6 +95,7 @@ uv run sesame-remo status-daemon \
 Sesame5へのBLE接続は維持し、`mechStatus` publish通知を受けて状態を更新します。施錠時は再生中の音声プロセスを終了して音を止めます。BLE接続が実際に切断された場合や、状態監視が終了した場合も音は停止します。
 
 この状態監視方式と、公式Android/iOS SDKのBLE広告・再接続処理を比較した調査メモは[docs/official-sdk-ble-reconnect.md](docs/official-sdk-ble-reconnect.md)にあります。
+状態監視の状態遷移は[docs/status-monitor-state-machine.md](docs/status-monitor-state-machine.md)に図でまとめています。
 
 状態監視の標準出力はJSON Lines形式です。各行にUTCの`timestamp`と`event`が入り、`status`、`state_changed`、`advertisement_received`、`connection_attempt`、`connected`、`connection_failed`、`connection_lost`、`scan_timeout`などを記録します。`mechStatus`がしばらく来ないだけでは接続を切らず、BLEクライアントが実際に切断状態になった時に再接続します。LaunchAgentで起動した場合は、plistの`StandardOutPath`と`StandardErrorPath`に保存されます。
 
