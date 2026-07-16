@@ -1,7 +1,7 @@
 [project]
 name = "sesame-remo"
 version = "0.1.0"
-description = "Turn on a Nature Remo light when Sesame Touch Pro unlock history is observed."
+description = "Monitor Sesame5 lock state and trigger local or Nature Remo feedback."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [

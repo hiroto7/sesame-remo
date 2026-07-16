@@ -10,6 +10,8 @@ from .history import HistoryRecord, is_touch_pro_history
 from .key_qr import decode_sesame5_share_url
 from .nature import NatureRemoClient
 from .sesame_client import SesameOS3Client, SesameScanTimeout
+from .sound import DEFAULT_REPEAT_GAP, DEFAULT_SOUND_PATH, DEFAULT_VOLUME
+from .status_daemon import run_status_daemon
 
 
 async def history_dump(
@@ -34,6 +36,33 @@ async def history_dump(
     if should_delete:
         print(f"deleted history record {record.record_id}", file=sys.stderr, flush=True)
     return 0
+
+
+async def status_dump(config_path: str, scan_timeout: float) -> int:
+    cfg = load_config(config_path)
+    client = SesameOS3Client(cfg.sesame_id, cfg.sesame_secret_key)
+    status = await client.read_status_once(scan_timeout=scan_timeout)
+    print(status.to_json_line(), flush=True)
+    return 0
+
+
+async def status_daemon(
+    config_path: str,
+    scan_timeout: float,
+    poll_interval: float,
+    sound_path: str,
+    volume: float,
+    repeat_gap: float,
+) -> int:
+    cfg = load_config(config_path)
+    return await run_status_daemon(
+        cfg,
+        scan_timeout=scan_timeout,
+        poll_interval=poll_interval,
+        sound_path=sound_path,
+        volume=volume,
+        repeat_gap=repeat_gap,
+    )
 
 
 async def daemon(config_path: str, scan_timeout: float, poll_interval: float) -> int:
@@ -114,6 +143,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--delete-after-read", action=argparse.BooleanOptionalAction, default=None
     )
 
+    status = sub.add_parser("status-dump")
+    status.add_argument("--config", required=True)
+    status.add_argument("--scan-timeout", type=float, default=10.0)
+
+    status_run = sub.add_parser("status-daemon")
+    status_run.add_argument("--config", required=True)
+    status_run.add_argument("--scan-timeout", type=float, default=10.0)
+    status_run.add_argument("--poll-interval", type=float, default=2.0)
+    status_run.add_argument("--sound", default=DEFAULT_SOUND_PATH)
+    status_run.add_argument("--volume", type=float, default=DEFAULT_VOLUME)
+    status_run.add_argument("--repeat-gap", type=float, default=DEFAULT_REPEAT_GAP)
+
     run = sub.add_parser("daemon")
     run.add_argument("--config", required=True)
     run.add_argument("--scan-timeout", type=float, default=10.0)
@@ -129,6 +170,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "history-dump":
             return asyncio.run(
                 history_dump(args.config, args.scan_timeout, args.delete_after_read)
+            )
+        if args.command == "status-dump":
+            return asyncio.run(status_dump(args.config, args.scan_timeout))
+        if args.command == "status-daemon":
+            return asyncio.run(
+                status_daemon(
+                    args.config,
+                    args.scan_timeout,
+                    args.poll_interval,
+                    args.sound,
+                    args.volume,
+                    args.repeat_gap,
+                )
             )
         if args.command == "daemon":
             return asyncio.run(

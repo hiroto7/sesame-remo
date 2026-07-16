@@ -73,6 +73,32 @@ Sesame5は履歴キューの先頭1件を返し、そのレコードを削除す
 
 つまり、現在の実装は公式アプリの履歴と共存する非破壊な監視ではありません。公式履歴を保持したままTouch Proだけを確実に検出するには、将来的にTouch Pro本体のBLEイベントを直接監視する別方式の調査が必要です。
 
+### 操作元を区別せず施錠状態だけ読む場合
+
+Touch Pro・Sesameアプリ・手動操作を区別せず、現在の施錠状態だけを取得する場合は、履歴を読まずにSesame5の`mechStatus`通知を使えます。この場合、履歴削除は行いません。確認には次を実行します。
+
+```bash
+uv run sesame-remo status-dump --config config.toml
+```
+
+`is_locked`が現在の施錠状態、`is_unlocked`が解錠状態です。状態に応じて外部機器をON/OFFする常駐処理は、この状態取得を使って実装できます。BLE接続できない時間帯は状態更新も遅れるため、外部機器を安全側へ戻すタイムアウトなどを別途設計してください。
+
+Macの内蔵音を解錠中だけループ再生する場合は、次を実行します。デフォルトでは`/System/Library/Sounds/Ping.aiff`を小さな音量で再生します。施錠、BLE接続失敗、状態不明のいずれでも音は停止します。
+
+```bash
+uv run sesame-remo status-daemon --config config.toml
+```
+
+音量、繰り返し間隔、音源はオプションで変更できます。
+
+```bash
+uv run sesame-remo status-daemon \
+  --config config.toml \
+  --sound /System/Library/Sounds/Tink.aiff \
+  --volume 0.2 \
+  --repeat-gap 1.0
+```
+
 また、Open Sensorなどの履歴も同じキューへ入るため、履歴が多い環境やBLE受信強度が弱い環境では、Touch Pro解錠の処理まで遅延することがあります。
 
 ## 1. インストール

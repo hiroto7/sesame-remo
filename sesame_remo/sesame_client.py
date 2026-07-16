@@ -18,6 +18,7 @@ from .ble_protocol import (
 )
 from .crypto import SesameOS3Cipher, aes_cmac
 from .history import HistoryRecord
+from .status import Sesame5MechanismStatus, is_mech_status_publish
 
 if TYPE_CHECKING:
     from bleak import BleakClient
@@ -88,6 +89,7 @@ class SesameOS3Client:
         self._receiver = SesameBleReceiver()
         self._cipher: SesameOS3Cipher | None = None
         self._initial_token: asyncio.Future[bytes] | None = None
+        self._mechanism_status: asyncio.Future[Sesame5MechanismStatus] | None = None
         self._responses: dict[int, asyncio.Future[SesameResponse]] = {}
         self._fatal_error: BaseException | None = None
 
@@ -139,6 +141,43 @@ class SesameOS3Client:
             scan_timeout=scan_timeout,
             delete_after_success=delete_after_read,
         )
+
+    async def read_status_once(
+        self, scan_timeout: float = 10.0
+    ) -> Sesame5MechanismStatus:
+        """Read the current lock state without reading or deleting history."""
+        from bleak import BleakClient
+
+        adv = await self.find(require_history=False, scan_timeout=scan_timeout)
+        if not adv.is_registered:
+            raise RuntimeError("Sesame5 is not registered")
+        async with BleakClient(adv.device, timeout=self.timeout) as client:
+            self._client = client
+            self._receiver = SesameBleReceiver()
+            self._cipher = None
+            self._initial_token = asyncio.get_running_loop().create_future()
+            self._mechanism_status = asyncio.get_running_loop().create_future()
+            self._responses = {}
+            self._fatal_error = None
+            try:
+                await client.start_notify(SESAME_NOTIFY_UUID, self._on_notify)
+                token = await asyncio.wait_for(
+                    self._initial_token, timeout=self.timeout
+                )
+                if len(token) != 4:
+                    raise RuntimeError(f"unexpected Sesame token length: {len(token)}")
+                session_auth = aes_cmac(self.secret_key, token)
+                self._cipher = SesameOS3Cipher(session_auth, token)
+                login = await self._send_plain_with_response(
+                    ItemCode.LOGIN, session_auth[:4]
+                )
+                self._require_success(login, "login")
+                return await asyncio.wait_for(
+                    self._mechanism_status, timeout=self.timeout
+                )
+            finally:
+                self._mechanism_status = None
+                self._client = None
 
     async def consume_history_once(
         self,
@@ -261,6 +300,11 @@ class SesameOS3Client:
                     and not self._initial_token.done()
                 ):
                     self._initial_token.set_result(parsed.payload)
+                elif is_mech_status_publish(parsed.item_code):
+                    if self._mechanism_status and not self._mechanism_status.done():
+                        self._mechanism_status.set_result(
+                            Sesame5MechanismStatus(parsed.payload)
+                        )
                 return
             if isinstance(parsed, SesameResponse):
                 future = self._responses.get(parsed.item_code)
@@ -273,6 +317,8 @@ class SesameOS3Client:
         self._fatal_error = exc
         if self._initial_token is not None and not self._initial_token.done():
             self._initial_token.set_exception(exc)
+        if self._mechanism_status is not None and not self._mechanism_status.done():
+            self._mechanism_status.set_exception(exc)
         for future in self._responses.values():
             if not future.done():
                 future.set_exception(exc)

@@ -107,3 +107,60 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
     )
 
     assert events == ["handler", "delete"]
+
+
+@pytest.mark.asyncio
+async def test_read_status_does_not_require_pending_history(monkeypatch) -> None:
+    secret = bytes.fromhex("00112233445566778899aabbccddeeff")
+    token = bytes.fromhex("01020304")
+    session_key = aes_cmac(secret, token)
+    mech_status_payload = bytes.fromhex("00000000341202")
+
+    class FakeBleakClient:
+        def __init__(self, _device: object, timeout: float) -> None:
+            self.timeout = timeout
+            self.callback = None
+            self.peer_rx = SesameOS3Cipher(session_key, token)
+            self.peer_tx = SesameOS3Cipher(session_key, token)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def start_notify(self, _uuid: str, callback) -> None:
+            self.callback = callback
+            callback(None, bytearray(b"\x03\x08\x0e" + token))
+
+        async def write_gatt_char(
+            self, _uuid: str, chunk: bytes, response: bool
+        ) -> None:
+            assert response is False
+            assert self.callback is not None
+            command = chunk[1:]
+            if chunk[0] >> 1 == 1:
+                assert command[0] == 2
+                self.callback(None, bytearray(b"\x03\x07\x02\x00"))
+                status_publish = self.peer_tx.encrypt(b"\x08\x51" + mech_status_payload)
+                self.callback(None, bytearray(b"\x05" + status_publish))
+                return
+            command = self.peer_rx.decrypt(command)
+            assert command[0] == 2
+            login_response = self.peer_tx.encrypt(b"\x07\x02\x00")
+            self.callback(None, bytearray(b"\x05" + login_response))
+
+    client = SesameOS3Client(str(uuid.uuid4()), secret.hex())
+
+    async def fake_find(*, require_history: bool, scan_timeout: float):
+        assert not require_history
+        assert scan_timeout == 1
+        return SimpleNamespace(device=object(), is_registered=True)
+
+    monkeypatch.setattr("bleak.BleakClient", FakeBleakClient)
+    monkeypatch.setattr(client, "find", fake_find)
+
+    status = await client.read_status_once(scan_timeout=1)
+
+    assert status.is_locked
+    assert status.position == 0x1234
