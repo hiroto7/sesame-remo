@@ -48,6 +48,7 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
     history_payload = bytes.fromhex("1122334402aabb")
     events: list[str] = []
     monitor_events: list[str] = []
+    status_events: list[bool] = []
 
     class FakeBleakClient:
         def __init__(self, _device: object, timeout: float) -> None:
@@ -75,6 +76,10 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
             if segment_type == 1:
                 assert chunk[1] == 2
                 self.callback(None, bytearray(b"\x03\x07\x02\x00"))
+                status_publish = self.peer_tx.encrypt(
+                    b"\x08\x51" + bytes.fromhex("00000000341200")
+                )
+                self.callback(None, bytearray(b"\x05" + status_publish))
                 return
 
             command = self.peer_rx.decrypt(chunk[1:])
@@ -108,6 +113,9 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
     async def event_handler(event: str, _fields: dict[str, object]) -> None:
         monitor_events.append(event)
 
+    def status_event_handler(status) -> None:
+        status_events.append(status.is_locked)
+
     monkeypatch.setattr("bleak.BleakClient", FakeBleakClient)
     monkeypatch.setattr(client, "find", fake_find)
 
@@ -116,6 +124,7 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
         scan_timeout=1,
         delete_after_success=True,
         event_handler=event_handler,
+        status_event_handler=status_event_handler,
     )
 
     assert events == ["handler", "delete"]
@@ -127,6 +136,7 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
         "history_received",
         "history_deleted",
     ]
+    assert status_events == [False]
 
 
 @pytest.mark.asyncio

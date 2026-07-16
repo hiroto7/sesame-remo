@@ -45,6 +45,7 @@ class SesameConnectionLost(ConnectionError):
 
 
 MonitorEventHandler = Callable[[str, dict[str, object]], Awaitable[None]]
+StatusEventHandler = Callable[[Sesame5MechanismStatus], None]
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ class SesameOS3Client:
         self._mechanism_status_queue: asyncio.Queue[Sesame5MechanismStatus] | None = (
             None
         )
+        self._status_event_handler: StatusEventHandler | None = None
         self._responses: dict[int, asyncio.Future[SesameResponse]] = {}
         self._fatal_error: BaseException | None = None
 
@@ -338,6 +340,7 @@ class SesameOS3Client:
         scan_timeout: float = 10.0,
         delete_after_success: bool = True,
         event_handler: MonitorEventHandler | None = None,
+        status_event_handler: StatusEventHandler | None = None,
     ) -> HistoryRecord:
         """Read one history record and delete it only after handler succeeds."""
         from bleak import BleakClient
@@ -357,6 +360,8 @@ class SesameOS3Client:
             self._receiver = SesameBleReceiver()
             self._cipher = None
             self._initial_token = asyncio.get_running_loop().create_future()
+            self._mechanism_status_queue = asyncio.Queue()
+            self._status_event_handler = status_event_handler
             self._responses = {}
             self._fatal_error = None
             try:
@@ -400,6 +405,8 @@ class SesameOS3Client:
                         )
                 return record
             finally:
+                self._mechanism_status_queue = None
+                self._status_event_handler = None
                 self._client = None
 
     async def delete_history(self, record_id_hex: str) -> None:
@@ -480,6 +487,10 @@ class SesameOS3Client:
                 elif is_mech_status_publish(parsed.item_code):
                     if self._mechanism_status_queue is not None:
                         self._mechanism_status_queue.put_nowait(
+                            Sesame5MechanismStatus(parsed.payload)
+                        )
+                    if self._status_event_handler is not None:
+                        self._status_event_handler(
                             Sesame5MechanismStatus(parsed.payload)
                         )
                 return

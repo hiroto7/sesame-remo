@@ -15,6 +15,7 @@ from .nature import NatureRemoClient
 from .sesame_client import SesameOS3Client, SesameScanTimeout
 from .sound import DEFAULT_REPEAT_GAP, DEFAULT_SOUND_PATH, DEFAULT_VOLUME
 from .lock_state_monitor import run_lock_state_monitor
+from .status import Sesame5MechanismStatus
 
 
 async def history_dump(
@@ -103,6 +104,7 @@ async def touch_pro_trigger(
         raise ValueError("nature_light_button must not be empty")
 
     cycle = 0
+    last_locked: bool | None = None
     while True:
         cycle += 1
         cycle_started_at = time.monotonic()
@@ -123,6 +125,23 @@ async def touch_pro_trigger(
                 ),
                 flush=True,
             )
+
+        def handle_status(status: Sesame5MechanismStatus) -> None:
+            nonlocal last_locked
+            fields = status.to_json_dict()
+            fields["source"] = "mechStatus"
+            asyncio.create_task(log_event("status_received", fields))
+            if last_locked is None or last_locked != status.is_locked:
+                asyncio.create_task(
+                    log_event(
+                        "status_state_changed",
+                        {
+                            "from_locked": last_locked,
+                            "to_locked": status.is_locked,
+                        },
+                    )
+                )
+            last_locked = status.is_locked
 
         try:
             await log_event("cycle_started")
@@ -171,6 +190,7 @@ async def touch_pro_trigger(
                 scan_timeout=scan_timeout,
                 delete_after_success=True,
                 event_handler=log_event,
+                status_event_handler=handle_status,
             )
         except SesameScanTimeout as exc:
             await log_event("cycle_timeout", {"error": str(exc)})
