@@ -63,12 +63,14 @@ class MacSoundLoop:
                 try:
                     await process.wait()
                 finally:
-                    if process.returncode is None:
-                        process.terminate()
-                        with suppress(ProcessLookupError):
-                            await process.wait()
-                    if self._process is process:
-                        self._process = None
+                    try:
+                        if process.returncode is None:
+                            process.terminate()
+                            with suppress(ProcessLookupError):
+                                await process.wait()
+                    finally:
+                        if self._process is process:
+                            self._process = None
                 await asyncio.sleep(self.repeat_gap)
         except asyncio.CancelledError:
             raise

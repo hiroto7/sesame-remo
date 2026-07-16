@@ -169,8 +169,18 @@ class SesameOS3Client:
         from bleak import BleakScanner
 
         advertisements: asyncio.Queue[SesameAdvertisement] = asyncio.Queue(maxsize=1)
+        connection_active = False
+
+        def discard_queued_advertisements() -> None:
+            while True:
+                try:
+                    advertisements.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
 
         def callback(device: BLEDevice, advertisement_data: AdvertisementData) -> None:
+            if connection_active:
+                return
             parsed = parse_sesame5_advertisement(device, advertisement_data)
             if (
                 parsed is None
@@ -218,9 +228,12 @@ class SesameOS3Client:
                         await connection_event_handler("connection_failed")
                     if connection_lost_handler is not None:
                         await connection_lost_handler()
+                    discard_queued_advertisements()
                     continue
 
+                connection_lost = False
                 try:
+                    connection_active = True
                     if connection_event_handler is not None:
                         await connection_event_handler("connected")
                     queue = self._require_status_queue()
@@ -231,13 +244,16 @@ class SesameOS3Client:
                             )
                     except SesameConnectionLost:
                         # A real BLE disconnect is replaced by the next advert.
-                        if connection_event_handler is not None:
-                            await connection_event_handler("connection_lost")
-                        if connection_lost_handler is not None:
-                            await connection_lost_handler()
-                        pass
+                        connection_lost = True
                 finally:
+                    connection_active = False
+                    discard_queued_advertisements()
                     await connection.__aexit__(None, None, None)
+                if connection_lost:
+                    if connection_event_handler is not None:
+                        await connection_event_handler("connection_lost")
+                    if connection_lost_handler is not None:
+                        await connection_lost_handler()
         finally:
             await scanner.stop()
             if connection_event_handler is not None:
