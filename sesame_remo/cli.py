@@ -105,6 +105,7 @@ async def touch_pro_trigger(
 
     cycle = 0
     last_locked: bool | None = None
+    last_unlock_transition_at: float | None = None
     while True:
         cycle += 1
         cycle_started_at = time.monotonic()
@@ -126,20 +127,21 @@ async def touch_pro_trigger(
                 flush=True,
             )
 
-        def handle_status(status: Sesame5MechanismStatus) -> None:
+        async def handle_status(status: Sesame5MechanismStatus) -> None:
             nonlocal last_locked
+            nonlocal last_unlock_transition_at
             fields = status.to_json_dict()
             fields["source"] = "mechStatus"
-            asyncio.create_task(log_event("status_received", fields))
-            if last_locked is None or last_locked != status.is_locked:
-                asyncio.create_task(
-                    log_event(
-                        "status_state_changed",
-                        {
-                            "from_locked": last_locked,
-                            "to_locked": status.is_locked,
-                        },
-                    )
+            await log_event("status_received", fields)
+            if last_locked is not None and last_locked != status.is_locked:
+                if not status.is_locked:
+                    last_unlock_transition_at = time.monotonic()
+                await log_event(
+                    "status_state_changed",
+                    {
+                        "from_locked": last_locked,
+                        "to_locked": status.is_locked,
+                    },
                 )
             last_locked = status.is_locked
 
@@ -162,7 +164,14 @@ async def touch_pro_trigger(
                     return
                 await log_event(
                     "touch_pro_matched",
-                    {"record_id": record.record_id},
+                    {
+                        "record_id": record.record_id,
+                        "status_to_history_seconds": (
+                            None
+                            if last_unlock_transition_at is None
+                            else time.monotonic() - last_unlock_transition_at
+                        ),
+                    },
                 )
                 await log_event(
                     "nature_request_started", {"record_id": record.record_id}
@@ -185,12 +194,12 @@ async def touch_pro_trigger(
                     flush=True,
                 )
 
-            await client.consume_history_once(
-                handle,
+            await client.monitor_status(
+                handle_status,
                 scan_timeout=scan_timeout,
-                delete_after_success=True,
-                event_handler=log_event,
-                status_event_handler=handle_status,
+                history_handler=handle,
+                history_event_handler=log_event,
+                history_poll_interval=poll_interval,
             )
         except SesameScanTimeout as exc:
             await log_event("cycle_timeout", {"error": str(exc)})
