@@ -23,6 +23,18 @@ flowchart LR
 
 Python 3.13は`.python-version`に従ってuvが管理します。システムPythonを別途用意する必要はありません。
 
+## Sesame側の技術仕様・一次情報
+
+Sesame本体、Sesame Touch Pro、SesameOS3、BLE通信、履歴取得の仕様を確認するときは、Candy Houseの公式SesameSDKをマスタ参照先とします。
+
+- [SesameSDK Android with DemoApp](https://github.com/CANDY-HOUSE/SesameSDK_Android_with_DemoApp)：Android SDK本体と公式アプリのデモ。`sesame-sdk`配下にSesame5、Touch Pro、OS3通信、履歴処理の実装があります。
+- [SesameSDK iOS with DemoApp](https://github.com/CANDY-HOUSE/SesameSDK_iOS_with_DemoApp)：iOS SDK本体と公式アプリのデモ。`Sources`配下および`doc`を参照してください。
+- [SesameSDK ESP32 with DemoApp](https://github.com/CANDY-HOUSE/SesameSDK_ESP32_with_DemoApp)：組み込み向けの公式参照実装。ESP32-C3からSesame5へBLE接続・登録・制御するサンプルです。
+
+ESP32版は公式の公開リポジトリですが、Sesame5の制御サンプルが中心で、Touch Proや履歴取得の仕様を網羅する資料ではありません。Touch Pro・SesameOS3・履歴の詳細は、Android SDKとiOS SDKの実装も突き合わせて確認します。
+
+このリポジトリの`sesame_remo/`以下は、上記SDKのうち本アプリに必要なBLE通信、OS3暗号、Sesame5履歴取得部分をPythonへ移植したものです。仕様の根拠を確認する場合は、まず公式SDKの実装を確認し、その後に対応する[sesame_client.py](sesame_remo/sesame_client.py)、[ble_protocol.py](sesame_remo/ble_protocol.py)、[crypto.py](sesame_remo/crypto.py)、[history.py](sesame_remo/history.py)を確認してください。
+
 ## セットアップの流れ
 
 初回だけ、次の順番で設定します。
