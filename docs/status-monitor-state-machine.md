@@ -1,6 +1,6 @@
 # 状態監視の状態遷移
 
-対象は`status-daemon`のBLE状態監視です。履歴を読む`daemon`とは別の処理で、Touch Pro・Sesameアプリ・手動操作を区別せず、Sesame5の現在状態を監視します。
+対象は`lock-state-monitor`のBLE状態監視です。履歴を読む`touch-pro-trigger`とは別の処理で、Touch Pro・Sesameアプリ・手動操作を区別せず、Sesame5の現在状態を監視します。
 
 ```mermaid
 stateDiagram-v2
@@ -52,4 +52,3 @@ stateDiagram-v2
 - `status-dump`の1回取得はこの常駐監視とは別で、`mechStatus`待ちにクライアントのタイムアウトを使います。
 
 実機で確認した通知頻度、旧実装の15秒再接続ループ、現行実装のログは[実機検証記録](field-verification.md)にあります。
-

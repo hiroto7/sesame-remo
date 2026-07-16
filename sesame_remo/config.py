@@ -16,8 +16,8 @@ class TouchProMatch:
 class Config:
     sesame_id: str
     sesame_secret_key: str
-    nature_token: str
-    nature_light_appliance_id: str
+    nature_token: str = ""
+    nature_light_appliance_id: str = ""
     nature_light_button: str = "on"
     cooldown_seconds: int = 30
     delete_history_after_read: bool = False
@@ -67,8 +67,8 @@ def load_config(path: str | Path) -> Config:
     return Config(
         sesame_id=sesame_id,
         sesame_secret_key=secret_key,
-        nature_token=str(data["nature_token"]),
-        nature_light_appliance_id=str(data["nature_light_appliance_id"]),
+        nature_token=str(data.get("nature_token", "")),
+        nature_light_appliance_id=str(data.get("nature_light_appliance_id", "")),
         nature_light_button=str(data.get("nature_light_button", "on")),
         cooldown_seconds=cooldown_seconds,
         delete_history_after_read=bool(data.get("delete_history_after_read", False)),

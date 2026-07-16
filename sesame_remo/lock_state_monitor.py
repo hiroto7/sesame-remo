@@ -10,7 +10,7 @@ from .sesame_client import SesameOS3Client, SesameScanTimeout
 from .sound import MacSoundLoop
 
 
-async def run_status_daemon(
+async def run_lock_state_monitor(
     cfg: Config,
     *,
     scan_timeout: float,
@@ -81,7 +81,7 @@ async def run_status_daemon(
             except Exception as exc:
                 await sound.stop()
                 log_event("monitor_error", error=str(exc))
-                print(f"status daemon error: {exc}", file=sys.stderr, flush=True)
+                print(f"lock-state-monitor error: {exc}", file=sys.stderr, flush=True)
             await asyncio.sleep(poll_interval)
     finally:
         await sound.stop()

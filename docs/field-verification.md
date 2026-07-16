@@ -19,7 +19,7 @@
 
 ### 検証条件
 
-- `status-daemon`をforegroundで起動
+- `lock-state-monitor`をforegroundで起動
 - Sesame5とMacを同じ1Kの室内に配置
 - 音声ファイルを指定して状態監視
 - 標準出力のJSON Linesログを観測
@@ -56,7 +56,7 @@
 
 ## 音声再生の検証
 
-`status-daemon`の音声は、macOSの`afplay`で指定ファイルを1回再生し、終了したら再度`afplay`を起動する方式です。音声ファイル自体を内部的にシームレスループしているわけではありません。
+`lock-state-monitor`の音声は、macOSの`afplay`で指定ファイルを1回再生し、終了したら再度`afplay`を起動する方式です。音声ファイル自体を内部的にシームレスループしているわけではありません。
 
 そのため、次の性質があります。
 

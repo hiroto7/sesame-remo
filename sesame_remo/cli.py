@@ -5,13 +5,13 @@ import asyncio
 import sys
 
 from .config import load_config
-from .daemon import EventGate
+from .touch_pro_trigger import EventGate
 from .history import HistoryRecord, is_touch_pro_history
 from .key_qr import decode_sesame5_share_url
 from .nature import NatureRemoClient
 from .sesame_client import SesameOS3Client, SesameScanTimeout
 from .sound import DEFAULT_REPEAT_GAP, DEFAULT_SOUND_PATH, DEFAULT_VOLUME
-from .status_daemon import run_status_daemon
+from .lock_state_monitor import run_lock_state_monitor
 
 
 async def history_dump(
@@ -46,7 +46,7 @@ async def status_dump(config_path: str, scan_timeout: float) -> int:
     return 0
 
 
-async def status_daemon(
+async def lock_state_monitor(
     config_path: str,
     scan_timeout: float,
     poll_interval: float,
@@ -55,7 +55,7 @@ async def status_daemon(
     repeat_gap: float,
 ) -> int:
     cfg = load_config(config_path)
-    return await run_status_daemon(
+    return await run_lock_state_monitor(
         cfg,
         scan_timeout=scan_timeout,
         poll_interval=poll_interval,
@@ -65,7 +65,9 @@ async def status_daemon(
     )
 
 
-async def daemon(config_path: str, scan_timeout: float, poll_interval: float) -> int:
+async def touch_pro_trigger(
+    config_path: str, scan_timeout: float, poll_interval: float
+) -> int:
     cfg = load_config(config_path)
     gate = EventGate(cfg.cooldown_seconds)
     remo = NatureRemoClient(
@@ -74,19 +76,25 @@ async def daemon(config_path: str, scan_timeout: float, poll_interval: float) ->
         cfg.nature_light_button,
     )
     if not cfg.touch_pro_match.contains_hex and not cfg.touch_pro_match.prefix_hex:
-        raise ValueError("touch_pro_match must be configured before starting daemon")
+        raise ValueError(
+            "touch_pro_match must be configured before starting touch-pro-trigger"
+        )
     if not cfg.delete_history_after_read:
         raise ValueError(
-            "daemon requires delete_history_after_read=true to advance the history queue"
+            "touch-pro-trigger requires delete_history_after_read=true "
+            "to advance the history queue"
         )
     if not cfg.nature_token or cfg.nature_token == "replace-me":
-        raise ValueError("nature_token must be configured before starting daemon")
+        raise ValueError(
+            "nature_token must be configured before starting touch-pro-trigger"
+        )
     if (
         not cfg.nature_light_appliance_id
         or cfg.nature_light_appliance_id == "replace-me"
     ):
         raise ValueError(
-            "nature_light_appliance_id must be configured before starting daemon"
+            "nature_light_appliance_id must be configured before starting "
+            "touch-pro-trigger"
         )
     if not cfg.nature_light_button:
         raise ValueError("nature_light_button must not be empty")
@@ -118,7 +126,7 @@ async def daemon(config_path: str, scan_timeout: float, poll_interval: float) ->
         except SesameScanTimeout:
             pass
         except Exception as exc:
-            print(f"daemon error: {exc}", file=sys.stderr, flush=True)
+            print(f"touch-pro-trigger error: {exc}", file=sys.stderr, flush=True)
         await asyncio.sleep(poll_interval)
 
 
@@ -136,18 +144,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sesame-remo")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    dump = sub.add_parser("history-dump")
+    dump = sub.add_parser(
+        "history-dump", help="Read one Sesame history record and optionally delete it"
+    )
     dump.add_argument("--config", required=True)
     dump.add_argument("--scan-timeout", type=float, default=10.0)
     dump.add_argument(
         "--delete-after-read", action=argparse.BooleanOptionalAction, default=None
     )
 
-    status = sub.add_parser("status-dump")
+    status = sub.add_parser("status-dump", help="Read the current lock state once")
     status.add_argument("--config", required=True)
     status.add_argument("--scan-timeout", type=float, default=10.0)
 
-    status_run = sub.add_parser("status-daemon")
+    status_run = sub.add_parser(
+        "lock-state-monitor",
+        help="Monitor lock state and play sound while unlocked",
+    )
     status_run.add_argument("--config", required=True)
     status_run.add_argument("--scan-timeout", type=float, default=10.0)
     status_run.add_argument("--poll-interval", type=float, default=2.0)
@@ -155,12 +168,15 @@ def build_parser() -> argparse.ArgumentParser:
     status_run.add_argument("--volume", type=float, default=DEFAULT_VOLUME)
     status_run.add_argument("--repeat-gap", type=float, default=DEFAULT_REPEAT_GAP)
 
-    run = sub.add_parser("daemon")
+    run = sub.add_parser(
+        "touch-pro-trigger",
+        help="Trigger Nature Remo for Touch Pro unlock history",
+    )
     run.add_argument("--config", required=True)
     run.add_argument("--scan-timeout", type=float, default=10.0)
     run.add_argument("--poll-interval", type=float, default=2.0)
 
-    sub.add_parser("decode-qr")
+    sub.add_parser("decode-qr", help="Decode a Sesame owner/manager share URL")
     return parser
 
 
@@ -173,9 +189,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status-dump":
             return asyncio.run(status_dump(args.config, args.scan_timeout))
-        if args.command == "status-daemon":
+        if args.command == "lock-state-monitor":
             return asyncio.run(
-                status_daemon(
+                lock_state_monitor(
                     args.config,
                     args.scan_timeout,
                     args.poll_interval,
@@ -184,9 +200,9 @@ def main(argv: list[str] | None = None) -> int:
                     args.repeat_gap,
                 )
             )
-        if args.command == "daemon":
+        if args.command == "touch-pro-trigger":
             return asyncio.run(
-                daemon(args.config, args.scan_timeout, args.poll_interval)
+                touch_pro_trigger(args.config, args.scan_timeout, args.poll_interval)
             )
         if args.command == "decode-qr":
             return decode_qr()
