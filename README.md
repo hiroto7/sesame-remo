@@ -83,7 +83,7 @@ uv run sesame-remo status-dump --config config.toml
 
 `is_locked`が現在の施錠状態、`is_unlocked`が解錠状態です。状態に応じて外部機器をON/OFFする常駐処理は、この状態取得を使って実装できます。BLE接続できない時間帯は状態更新も遅れるため、外部機器を安全側へ戻すタイムアウトなどを別途設計してください。
 
-Macの内蔵音を解錠中だけループ再生する場合は、次を実行します。デフォルトでは`/System/Library/Sounds/Ping.aiff`を小さな音量で再生します。施錠、BLE接続失敗、状態不明のいずれでも音は停止します。
+Macの内蔵音を解錠中だけループ再生する場合は、次を実行します。デフォルトでは`/System/Library/Sounds/Ping.aiff`を小さな音量で再生します。Sesame5へのBLE接続は維持し、`mechStatus` publish通知を受けて状態を更新します。施錠、BLE接続失敗、状態不明のいずれでも音は停止します。
 
 ```bash
 uv run sesame-remo status-daemon --config config.toml

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, AsyncIterator
 import uuid
 
 from .ble_protocol import (
@@ -89,7 +90,9 @@ class SesameOS3Client:
         self._receiver = SesameBleReceiver()
         self._cipher: SesameOS3Cipher | None = None
         self._initial_token: asyncio.Future[bytes] | None = None
-        self._mechanism_status: asyncio.Future[Sesame5MechanismStatus] | None = None
+        self._mechanism_status_queue: asyncio.Queue[Sesame5MechanismStatus] | None = (
+            None
+        )
         self._responses: dict[int, asyncio.Future[SesameResponse]] = {}
         self._fatal_error: BaseException | None = None
 
@@ -146,6 +149,24 @@ class SesameOS3Client:
         self, scan_timeout: float = 10.0
     ) -> Sesame5MechanismStatus:
         """Read the current lock state without reading or deleting history."""
+        async with self._logged_in(scan_timeout=scan_timeout):
+            queue = self._require_status_queue()
+            return await self._next_status(queue)
+
+    async def monitor_status(
+        self,
+        handler: Callable[[Sesame5MechanismStatus], Awaitable[None]],
+        *,
+        scan_timeout: float = 10.0,
+    ) -> None:
+        """Keep one BLE connection and deliver mechStatus publishes."""
+        async with self._logged_in(scan_timeout=scan_timeout):
+            queue = self._require_status_queue()
+            while True:
+                await handler(await self._next_status(queue))
+
+    @asynccontextmanager
+    async def _logged_in(self, *, scan_timeout: float) -> AsyncIterator[None]:
         from bleak import BleakClient
 
         adv = await self.find(require_history=False, scan_timeout=scan_timeout)
@@ -156,7 +177,7 @@ class SesameOS3Client:
             self._receiver = SesameBleReceiver()
             self._cipher = None
             self._initial_token = asyncio.get_running_loop().create_future()
-            self._mechanism_status = asyncio.get_running_loop().create_future()
+            self._mechanism_status_queue = asyncio.Queue()
             self._responses = {}
             self._fatal_error = None
             try:
@@ -172,12 +193,25 @@ class SesameOS3Client:
                     ItemCode.LOGIN, session_auth[:4]
                 )
                 self._require_success(login, "login")
-                return await asyncio.wait_for(
-                    self._mechanism_status, timeout=self.timeout
-                )
+                yield
             finally:
-                self._mechanism_status = None
+                self._mechanism_status_queue = None
                 self._client = None
+
+    async def _next_status(
+        self, queue: asyncio.Queue[Sesame5MechanismStatus]
+    ) -> Sesame5MechanismStatus:
+        try:
+            return await asyncio.wait_for(queue.get(), timeout=self.timeout)
+        except TimeoutError as exc:
+            raise SesameScanTimeout(
+                f"timed out after {self.timeout:g}s waiting for Sesame5 mechStatus"
+            ) from exc
+
+    def _require_status_queue(self) -> asyncio.Queue[Sesame5MechanismStatus]:
+        if self._mechanism_status_queue is None:
+            raise RuntimeError("status monitor is not connected")
+        return self._mechanism_status_queue
 
     async def consume_history_once(
         self,
@@ -301,8 +335,8 @@ class SesameOS3Client:
                 ):
                     self._initial_token.set_result(parsed.payload)
                 elif is_mech_status_publish(parsed.item_code):
-                    if self._mechanism_status and not self._mechanism_status.done():
-                        self._mechanism_status.set_result(
+                    if self._mechanism_status_queue is not None:
+                        self._mechanism_status_queue.put_nowait(
                             Sesame5MechanismStatus(parsed.payload)
                         )
                 return
@@ -317,8 +351,6 @@ class SesameOS3Client:
         self._fatal_error = exc
         if self._initial_token is not None and not self._initial_token.done():
             self._initial_token.set_exception(exc)
-        if self._mechanism_status is not None and not self._mechanism_status.done():
-            self._mechanism_status.set_exception(exc)
         for future in self._responses.values():
             if not future.done():
                 future.set_exception(exc)

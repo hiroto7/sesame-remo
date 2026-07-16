@@ -28,14 +28,19 @@ async def run_status_daemon(
     try:
         while True:
             try:
-                status = await SesameOS3Client(
-                    cfg.sesame_id, cfg.sesame_secret_key
-                ).read_status_once(scan_timeout=scan_timeout)
-                print(status.to_json_line(), flush=True)
-                if status.is_unlocked:
-                    await sound.start()
-                else:
-                    await sound.stop()
+                client = SesameOS3Client(cfg.sesame_id, cfg.sesame_secret_key)
+
+                async def handle_status(status) -> None:
+                    print(status.to_json_line(), flush=True)
+                    if status.is_unlocked:
+                        await sound.start()
+                    else:
+                        await sound.stop()
+
+                await client.monitor_status(
+                    handle_status,
+                    scan_timeout=scan_timeout,
+                )
             except SesameScanTimeout:
                 await sound.stop()
             except Exception as exc:

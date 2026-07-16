@@ -164,3 +164,64 @@ async def test_read_status_does_not_require_pending_history(monkeypatch) -> None
 
     assert status.is_locked
     assert status.position == 0x1234
+
+
+@pytest.mark.asyncio
+async def test_monitor_status_keeps_connection_for_publish_notifications(
+    monkeypatch,
+) -> None:
+    secret = bytes.fromhex("00112233445566778899aabbccddeeff")
+    token = bytes.fromhex("01020304")
+    session_key = aes_cmac(secret, token)
+    mech_status_payload = bytes.fromhex("00000000341200")
+    connection_count = 0
+
+    class StopMonitor(Exception):
+        pass
+
+    class FakeBleakClient:
+        def __init__(self, _device: object, timeout: float) -> None:
+            nonlocal connection_count
+            connection_count += 1
+            self.callback = None
+            self.peer_tx = SesameOS3Cipher(session_key, token)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def start_notify(self, _uuid: str, callback) -> None:
+            self.callback = callback
+            callback(None, bytearray(b"\x03\x08\x0e" + token))
+
+        async def write_gatt_char(
+            self, _uuid: str, chunk: bytes, response: bool
+        ) -> None:
+            assert response is False
+            assert self.callback is not None
+            assert chunk[0] >> 1 == 1
+            assert chunk[1] == 2
+            self.callback(None, bytearray(b"\x03\x07\x02\x00"))
+            status_publish = self.peer_tx.encrypt(b"\x08\x51" + mech_status_payload)
+            self.callback(None, bytearray(b"\x05" + status_publish))
+
+    client = SesameOS3Client(str(uuid.uuid4()), secret.hex())
+
+    async def fake_find(*, require_history: bool, scan_timeout: float):
+        assert not require_history
+        assert scan_timeout == 1
+        return SimpleNamespace(device=object(), is_registered=True)
+
+    async def handler(status) -> None:
+        assert status.is_unlocked
+        raise StopMonitor
+
+    monkeypatch.setattr("bleak.BleakClient", FakeBleakClient)
+    monkeypatch.setattr(client, "find", fake_find)
+
+    with pytest.raises(StopMonitor):
+        await client.monitor_status(handler, scan_timeout=1)
+
+    assert connection_count == 1
