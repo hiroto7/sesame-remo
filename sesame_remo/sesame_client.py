@@ -245,6 +245,7 @@ class SesameOS3Client:
                     continue
 
                 connection_lost = False
+                status_task: asyncio.Task[None] | None = None
                 history_task: asyncio.Task[None] | None = None
                 try:
                     connection_active = True
@@ -260,20 +261,32 @@ class SesameOS3Client:
                         )
                     queue = self._require_status_queue()
                     try:
-                        while True:
-                            await handler(
-                                await self._next_status_until_disconnected(queue)
-                            )
+                        status_task = asyncio.create_task(
+                            self._monitor_status_current_connection(handler, queue)
+                        )
+                        tasks = {status_task}
+                        if history_task is not None:
+                            tasks.add(history_task)
+                        done, _pending = await asyncio.wait(
+                            tasks, return_when=asyncio.FIRST_EXCEPTION
+                        )
+                        for task in done:
+                            task.result()
                     except SesameConnectionLost:
                         # A real BLE disconnect is replaced by the next advert.
                         connection_lost = True
                 finally:
-                    if history_task is not None:
-                        history_task.cancel()
-                        try:
-                            await history_task
-                        except asyncio.CancelledError:
-                            pass
+                    for task in (status_task, history_task):
+                        if task is not None:
+                            task.cancel()
+                    await asyncio.gather(
+                        *(
+                            task
+                            for task in (status_task, history_task)
+                            if task is not None
+                        ),
+                        return_exceptions=True,
+                    )
                     try:
                         await connection.__aexit__(None, None, None)
                     finally:
@@ -288,6 +301,14 @@ class SesameOS3Client:
             await scanner.stop()
             if connection_event_handler is not None:
                 await connection_event_handler("scan_stopped")
+
+    async def _monitor_status_current_connection(
+        self,
+        handler: Callable[[Sesame5MechanismStatus], Awaitable[None]],
+        queue: asyncio.Queue[Sesame5MechanismStatus],
+    ) -> None:
+        while True:
+            await handler(await self._next_status_until_disconnected(queue))
 
     @asynccontextmanager
     async def _logged_in(

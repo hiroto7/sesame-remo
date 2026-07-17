@@ -69,12 +69,16 @@ def make_touch_pro_history_handler(
         await log_event("nature_request_started", {"record_id": record.record_id})
         try:
             await asyncio.to_thread(remo.send_light_on)
-        except Exception:
+        except Exception as exc:
             await log_event(
                 "nature_request_completed",
-                {"record_id": record.record_id, "success": False},
+                {
+                    "record_id": record.record_id,
+                    "success": False,
+                    "error": str(exc),
+                },
             )
-            raise
+            return
         await log_event(
             "nature_request_completed",
             {"record_id": record.record_id, "success": True},
