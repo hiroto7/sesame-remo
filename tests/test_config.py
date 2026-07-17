@@ -33,7 +33,43 @@ sesame_secret_key = "00112233445566778899aabbccddeeff"
 """.strip()
     )
 
-    with pytest.raises(KeyError, match="nature_token"):
+    with pytest.raises(ValueError, match="nature_token"):
+        load_config(config)
+
+    loaded = load_config(config, require_nature=False)
+    assert loaded.nature_token == ""
+    assert loaded.nature_light_appliance_id == ""
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("nature_token", "   "),
+        ("nature_light_appliance_id", "   "),
+        ("nature_light_button", "   "),
+    ],
+)
+def test_load_config_rejects_blank_nature_settings(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    values = {
+        "nature_token": "token",
+        "nature_light_appliance_id": "appliance",
+        "nature_light_button": "on",
+    }
+    values[field] = value
+    config = tmp_path / "config.toml"
+    config.write_text(
+        f"""
+sesame_id = "10000000-0000-0000-0000-000000000000"
+sesame_secret_key = "00112233445566778899aabbccddeeff"
+nature_token = "{values["nature_token"]}"
+nature_light_appliance_id = "{values["nature_light_appliance_id"]}"
+nature_light_button = "{values["nature_light_button"]}"
+""".strip()
+    )
+
+    with pytest.raises(ValueError):
         load_config(config)
 
 

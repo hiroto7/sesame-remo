@@ -31,6 +31,7 @@ async def run_lock_state_monitor(
     if not sound.sound_path.is_file():
         raise FileNotFoundError(f"sound file not found: {sound.sound_path}")
     last_locked: bool | None = None
+    nature_tasks: set[asyncio.Task[None]] = set()
     remo = NatureRemoClient(
         cfg.nature_token,
         cfg.nature_light_appliance_id,
@@ -61,6 +62,18 @@ async def run_lock_state_monitor(
     async def handle_connection_event(event: str) -> None:
         log_event(event)
 
+    async def send_light_on() -> None:
+        try:
+            await asyncio.to_thread(remo.send_light_on)
+        except Exception as exc:
+            log_event(
+                "nature_request_completed",
+                success=False,
+                error=str(exc),
+            )
+        else:
+            log_event("nature_request_completed", success=True)
+
     async def handle_status(status: Sesame5MechanismStatus) -> None:
         nonlocal last_locked
         log_event("status", **status.to_json_dict())
@@ -76,16 +89,9 @@ async def run_lock_state_monitor(
             )
         if last_locked is True and status.is_unlocked:
             log_event("nature_request_started")
-            try:
-                await asyncio.to_thread(remo.send_light_on)
-            except Exception as exc:
-                log_event(
-                    "nature_request_completed",
-                    success=False,
-                    error=str(exc),
-                )
-            else:
-                log_event("nature_request_completed", success=True)
+            task = asyncio.create_task(send_light_on())
+            nature_tasks.add(task)
+            task.add_done_callback(nature_tasks.discard)
         last_locked = status.is_locked
         if status.is_unlocked:
             await sound.start()
@@ -104,4 +110,6 @@ async def run_lock_state_monitor(
         )
     finally:
         await sound.stop()
+        if nature_tasks:
+            await asyncio.gather(*nature_tasks, return_exceptions=True)
     return 0

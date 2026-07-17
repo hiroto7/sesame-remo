@@ -1,6 +1,6 @@
 # 状態監視
 
-`sesame-remo`は1つのBLE接続でSesame5の`mechStatus`通知を監視します。履歴の取得・削除や、操作元の判定は行いません。
+`sesame-remo monitor`は1つのBLE接続でSesame5の`mechStatus`通知を監視します。履歴の取得・削除や、操作元の判定は行いません。
 
 ```mermaid
 stateDiagram-v2

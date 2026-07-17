@@ -1,4 +1,6 @@
 from pathlib import Path
+import asyncio
+import threading
 
 import pytest
 
@@ -84,3 +86,62 @@ async def test_unlock_transition_turns_light_on_once(
     assert len(light_calls) == 1
     assert len(sound_started) == 2
     assert len(sound_stopped) == 3
+
+
+@pytest.mark.asyncio
+async def test_nature_request_does_not_block_status_or_sound(
+    monkeypatch, tmp_path: Path
+) -> None:
+    sound_path = tmp_path / "sound.aiff"
+    sound_path.touch()
+    request_started = threading.Event()
+    release_request = threading.Event()
+    request_finished = threading.Event()
+    sound_started = False
+
+    class FakeSound:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.sound_path = sound_path
+
+        async def start(self) -> None:
+            nonlocal sound_started
+            sound_started = True
+
+        async def stop(self) -> None:
+            return None
+
+    class FakeRemo:
+        def __init__(self, *_args) -> None:
+            pass
+
+        def send_light_on(self) -> None:
+            request_started.set()
+            release_request.wait(timeout=1)
+            request_finished.set()
+
+    async def fake_run_monitor(_cfg, *, status_handler, **_kwargs) -> None:
+        await status_handler(Sesame5MechanismStatus(bytes.fromhex("00000000341202")))
+        await status_handler(Sesame5MechanismStatus(bytes.fromhex("00000000341200")))
+        for _ in range(100):
+            if request_started.is_set():
+                break
+            await asyncio.sleep(0)
+        assert request_started.is_set()
+        assert sound_started
+        assert not request_finished.is_set()
+        release_request.set()
+
+    monkeypatch.setattr("sesame_remo.lock_state_monitor.MacSoundLoop", FakeSound)
+    monkeypatch.setattr("sesame_remo.lock_state_monitor.NatureRemoClient", FakeRemo)
+    monkeypatch.setattr("sesame_remo.lock_state_monitor.run_monitor", fake_run_monitor)
+
+    await run_lock_state_monitor(
+        _config(),
+        scan_timeout=1,
+        poll_interval=1,
+        sound_path=str(sound_path),
+        volume=0.25,
+        repeat_gap=1,
+    )
+
+    assert request_finished.is_set()

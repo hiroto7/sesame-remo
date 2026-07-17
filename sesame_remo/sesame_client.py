@@ -225,13 +225,9 @@ class SesameOS3Client:
                     except SesameConnectionLost:
                         connection_lost = True
                 finally:
-                    for task in (status_task,):
-                        if task is not None:
-                            task.cancel()
-                    await asyncio.gather(
-                        *(task for task in (status_task,) if task is not None),
-                        return_exceptions=True,
-                    )
+                    if status_task is not None:
+                        status_task.cancel()
+                        await asyncio.gather(status_task, return_exceptions=True)
                     try:
                         await connection.__aexit__(None, None, None)
                     finally:

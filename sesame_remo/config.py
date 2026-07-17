@@ -32,7 +32,7 @@ def _validated_hex(value: str, name: str, *, byte_length: int | None = None) -> 
     return cleaned
 
 
-def load_config(path: str | Path) -> Config:
+def load_config(path: str | Path, *, require_nature: bool = True) -> Config:
     data = tomllib.loads(Path(path).read_text())
     sesame_id = str(data["sesame_id"])
     try:
@@ -50,14 +50,16 @@ def load_config(path: str | Path) -> Config:
             "sesame_secret_key is still the placeholder; set your Sesame5 secret key"
         )
 
-    nature_token = str(data["nature_token"])
-    if not nature_token or nature_token == "replace-me":
+    nature_token = str(data.get("nature_token", "")).strip()
+    if require_nature and (not nature_token or nature_token == "replace-me"):
         raise ValueError("nature_token must be configured")
-    nature_light_appliance_id = str(data["nature_light_appliance_id"])
-    if not nature_light_appliance_id or nature_light_appliance_id == "replace-me":
+    nature_light_appliance_id = str(data.get("nature_light_appliance_id", "")).strip()
+    if require_nature and (
+        not nature_light_appliance_id or nature_light_appliance_id == "replace-me"
+    ):
         raise ValueError("nature_light_appliance_id must be configured")
-    nature_light_button = str(data.get("nature_light_button", "on"))
-    if not nature_light_button:
+    nature_light_button = str(data.get("nature_light_button", "on")).strip()
+    if require_nature and not nature_light_button:
         raise ValueError("nature_light_button must not be empty")
 
     return Config(

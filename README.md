@@ -33,7 +33,13 @@ uv sync
 cp config.example.toml config.toml
 ```
 
-`config.toml`へSesame5のUUID・secret keyとNature Remoの設定を記入します。`config.toml`はGit管理対象外です。
+SesameアプリでSesame5のownerまたはmanager共有リンクを発行し、Macのクリップボードへコピーします。共有リンクには鍵が含まれるため、チャットやIssueへ貼らないでください。guest鍵はCandy Houseサーバーによる署名が必要なため、このBLE単独版では使用できません。
+
+```bash
+pbpaste | uv run sesame-remo decode-qr
+```
+
+表示されたUUIDとsecret keyを、Nature Remo設定とともに`config.toml`へ記入します。`config.toml`はGit管理対象外です。
 
 ```toml
 sesame_id = "..."
@@ -43,10 +49,18 @@ nature_light_appliance_id = "..."
 nature_light_button = "on"
 ```
 
+[Natureのアクセストークン管理画面](https://home.nature.global/)でPersonal Access Tokenを発行します。登録済みLIGHT家電のappliance IDはNature Cloud APIの`GET /1/appliances`で確認できます。
+
+設定後、現在の施錠状態だけを確認する場合:
+
+```bash
+uv run sesame-remo status-dump --config config.toml
+```
+
 ## Foreground実行
 
 ```bash
-uv run sesame-remo --config config.toml
+uv run sesame-remo monitor --config config.toml
 ```
 
 施錠中から解錠中へ変化すると照明がONになり、音声が再生されます。施錠、BLE切断、終了時には音声を停止します。標準出力には状態・接続・Nature APIの結果をJSON Linesで出力します。

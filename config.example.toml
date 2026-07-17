@@ -1,6 +1,6 @@
-# Sesame5 UUID and 16-byte secret key.
-sesame_id = "replace-me"
-sesame_secret_key = "replace-me"
+# Sesame5 UUID and 16-byte secret key from an owner or manager share link.
+sesame_id = "00000000-0000-0000-0000-000000000000"
+sesame_secret_key = "00000000000000000000000000000000"
 
 # Nature Remo LIGHT settings. These values are required.
 nature_token = "replace-me"
