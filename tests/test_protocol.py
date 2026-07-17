@@ -1,18 +1,12 @@
 from sesame_remo.ble_protocol import (
-    ItemCode,
     SegmentType,
     SesameBleReceiver,
     SesameResponse,
     chunks_for_transmit,
-    command_payload,
     parse_plain_notify,
 )
 from sesame_remo.crypto import counter_bytes
 import pytest
-
-
-def test_command_payload_prefixes_item_code() -> None:
-    assert command_payload(ItemCode.HISTORY, b"\x01") == b"\x04\x01"
 
 
 def test_chunks_for_transmit_single_plain_segment() -> None:

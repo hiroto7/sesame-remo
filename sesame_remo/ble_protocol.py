@@ -16,9 +16,7 @@ class OpCode(IntEnum):
 
 class ItemCode(IntEnum):
     LOGIN = 2
-    HISTORY = 4
     INITIAL = 14
-    HISTORY_DELETE = 18
 
 
 @dataclass(frozen=True)

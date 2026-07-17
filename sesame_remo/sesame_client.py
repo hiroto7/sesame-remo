@@ -18,7 +18,6 @@ from .ble_protocol import (
     parse_plain_notify,
 )
 from .crypto import SesameOS3Cipher, aes_cmac
-from .history import HistoryRecord
 from .status import Sesame5MechanismStatus, is_mech_status_publish
 
 if TYPE_CHECKING:
@@ -44,15 +43,10 @@ class SesameConnectionLost(ConnectionError):
     pass
 
 
-MonitorEventHandler = Callable[[str, dict[str, object]], Awaitable[None]]
-StatusEventHandler = Callable[[Sesame5MechanismStatus], None]
-
-
 @dataclass(frozen=True)
 class SesameAdvertisement:
     device: BLEDevice
     device_id: uuid.UUID
-    has_history: bool
     is_registered: bool
     product_type: int
 
@@ -81,7 +75,6 @@ def parse_sesame5_advertisement(
     return SesameAdvertisement(
         device=device,
         device_id=device_id,
-        has_history=(adv[2] & 0x02) > 0,
         is_registered=(adv[2] & 0x01) > 0,
         product_type=product_type,
     )
@@ -101,16 +94,13 @@ class SesameOS3Client:
         self._mechanism_status_queue: asyncio.Queue[Sesame5MechanismStatus] | None = (
             None
         )
-        self._status_event_handler: StatusEventHandler | None = None
         self._responses: dict[int, asyncio.Future[SesameResponse]] = {}
         self._fatal_error: BaseException | None = None
 
         if len(self.secret_key) != 16:
             raise ValueError("secret key must be exactly 16 bytes")
 
-    async def find(
-        self, require_history: bool, scan_timeout: float = 10.0
-    ) -> SesameAdvertisement:
+    async def find(self, scan_timeout: float = 10.0) -> SesameAdvertisement:
         from bleak import BleakScanner
 
         found: asyncio.Future[SesameAdvertisement] = (
@@ -123,8 +113,6 @@ class SesameOS3Client:
             parsed = parse_sesame5_advertisement(device, advertisement_data)
             if parsed is None or parsed.device_id != self.sesame_id:
                 return
-            if require_history and not parsed.has_history:
-                return
             found.set_result(parsed)
 
         scanner = BleakScanner(callback, service_uuids=[SESAME_SERVICE_UUID])
@@ -133,31 +121,17 @@ class SesameOS3Client:
             try:
                 return await asyncio.wait_for(found, timeout=scan_timeout)
             except TimeoutError as exc:
-                requirement = " with pending history" if require_history else ""
                 raise SesameScanTimeout(
                     f"timed out after {scan_timeout:g}s waiting for Sesame5 "
-                    f"{self.sesame_id}{requirement}; check the UUID, Bluetooth permission, "
-                    "distance, and generate a new lock history event"
+                    f"{self.sesame_id}; check the UUID, Bluetooth permission, and distance"
                 ) from exc
         finally:
             await scanner.stop()
 
-    async def read_history_once(
-        self, scan_timeout: float = 10.0, delete_after_read: bool = False
-    ) -> HistoryRecord:
-        async def no_op(_record: HistoryRecord) -> None:
-            return None
-
-        return await self.consume_history_once(
-            no_op,
-            scan_timeout=scan_timeout,
-            delete_after_success=delete_after_read,
-        )
-
     async def read_status_once(
         self, scan_timeout: float = 10.0
     ) -> Sesame5MechanismStatus:
-        """Read the current lock state without reading or deleting history."""
+        """Read the current lock state."""
         async with self._logged_in(scan_timeout=scan_timeout):
             queue = self._require_status_queue()
             return await self._next_status(queue)
@@ -169,14 +143,11 @@ class SesameOS3Client:
         scan_timeout: float = 10.0,
         connection_lost_handler: Callable[[], Awaitable[None]] | None = None,
         connection_event_handler: Callable[[str], Awaitable[None]] | None = None,
-        history_handler: Callable[[HistoryRecord], Awaitable[None]] | None = None,
-        history_event_handler: MonitorEventHandler | None = None,
     ) -> None:
         """Keep scanning and reconnect when a Sesame advertisement is received."""
         from bleak import BleakScanner
 
         advertisements: asyncio.Queue[SesameAdvertisement] = asyncio.Queue(maxsize=1)
-        history_available: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         connection_active = False
 
         def discard_queued_advertisements() -> None:
@@ -194,11 +165,6 @@ class SesameOS3Client:
                 or not parsed.is_registered
             ):
                 return
-            if parsed.has_history:
-                try:
-                    history_available.put_nowait(None)
-                except asyncio.QueueFull:
-                    pass
             if connection_active:
                 return
             try:
@@ -246,45 +212,24 @@ class SesameOS3Client:
 
                 connection_lost = False
                 status_task: asyncio.Task[None] | None = None
-                history_task: asyncio.Task[None] | None = None
                 try:
                     connection_active = True
                     if connection_event_handler is not None:
                         await connection_event_handler("connected")
-                    if history_handler is not None:
-                        history_task = asyncio.create_task(
-                            self._poll_history_current_connection(
-                                history_handler,
-                                event_handler=history_event_handler,
-                                history_available=history_available,
-                            )
-                        )
                     queue = self._require_status_queue()
+                    status_task = asyncio.create_task(
+                        self._monitor_status_current_connection(handler, queue)
+                    )
                     try:
-                        status_task = asyncio.create_task(
-                            self._monitor_status_current_connection(handler, queue)
-                        )
-                        tasks = {status_task}
-                        if history_task is not None:
-                            tasks.add(history_task)
-                        done, _pending = await asyncio.wait(
-                            tasks, return_when=asyncio.FIRST_EXCEPTION
-                        )
-                        for task in done:
-                            task.result()
+                        await status_task
                     except SesameConnectionLost:
-                        # A real BLE disconnect is replaced by the next advert.
                         connection_lost = True
                 finally:
-                    for task in (status_task, history_task):
+                    for task in (status_task,):
                         if task is not None:
                             task.cancel()
                     await asyncio.gather(
-                        *(
-                            task
-                            for task in (status_task, history_task)
-                            if task is not None
-                        ),
+                        *(task for task in (status_task,) if task is not None),
                         return_exceptions=True,
                     )
                     try:
@@ -316,15 +261,10 @@ class SesameOS3Client:
         *,
         scan_timeout: float,
         advertisement: SesameAdvertisement | None = None,
-        require_history: bool = False,
-        event_handler: MonitorEventHandler | None = None,
-        status_event_handler: StatusEventHandler | None = None,
     ) -> AsyncIterator[None]:
         from bleak import BleakClient
 
-        adv = advertisement or await self.find(
-            require_history=require_history, scan_timeout=scan_timeout
-        )
+        adv = advertisement or await self.find(scan_timeout=scan_timeout)
         if not adv.is_registered:
             raise RuntimeError("Sesame5 is not registered")
         async with BleakClient(adv.device, timeout=self.timeout) as client:
@@ -333,7 +273,6 @@ class SesameOS3Client:
             self._cipher = None
             self._initial_token = asyncio.get_running_loop().create_future()
             self._mechanism_status_queue = asyncio.Queue()
-            self._status_event_handler = status_event_handler
             self._responses = {}
             self._fatal_error = None
             try:
@@ -349,12 +288,9 @@ class SesameOS3Client:
                     ItemCode.LOGIN, session_auth[:4]
                 )
                 self._require_success(login, "login")
-                if event_handler is not None:
-                    await event_handler("connected", {})
                 yield
             finally:
                 self._mechanism_status_queue = None
-                self._status_event_handler = None
                 self._client = None
 
     async def _next_status(
@@ -384,95 +320,6 @@ class SesameOS3Client:
             raise RuntimeError("status monitor is not connected")
         return self._mechanism_status_queue
 
-    async def _poll_history_current_connection(
-        self,
-        handler: Callable[[HistoryRecord], Awaitable[None]],
-        *,
-        event_handler: MonitorEventHandler | None,
-        history_available: asyncio.Queue[None],
-    ) -> None:
-        while True:
-            await history_available.get()
-            record = await self.read_history_current_connection(
-                handler,
-                event_handler=event_handler,
-            )
-            if record is None:
-                continue
-
-    async def read_history_current_connection(
-        self,
-        handler: Callable[[HistoryRecord], Awaitable[None]],
-        *,
-        delete_after_success: bool = True,
-        event_handler: MonitorEventHandler | None = None,
-    ) -> HistoryRecord | None:
-        """Read one history record using the already authenticated BLE session."""
-        if self._cipher is None:
-            raise RuntimeError("not logged in")
-        if event_handler is not None:
-            await event_handler("history_requested", {})
-        response = await self._send_cipher(ItemCode.HISTORY, b"\x01")
-        if response.result_code != 0:
-            return None
-        record = HistoryRecord(response.payload)
-        if event_handler is not None:
-            await event_handler(
-                "history_received",
-                {
-                    "record_id": record.record_id,
-                    "event_type": record.event_type,
-                    "is_unlock": record.is_unlock,
-                },
-            )
-        await handler(record)
-        if delete_after_success:
-            await self.delete_history(record.record_id)
-            if event_handler is not None:
-                await event_handler("history_deleted", {"record_id": record.record_id})
-        return record
-
-    async def consume_history_once(
-        self,
-        handler: Callable[[HistoryRecord], Awaitable[None]],
-        *,
-        scan_timeout: float = 10.0,
-        delete_after_success: bool = True,
-        event_handler: MonitorEventHandler | None = None,
-        status_event_handler: StatusEventHandler | None = None,
-    ) -> HistoryRecord:
-        """Read one history record and delete it only after handler succeeds."""
-        adv = await self.find(require_history=True, scan_timeout=scan_timeout)
-        if event_handler is not None:
-            await event_handler(
-                "advertisement_received",
-                {"has_history": adv.has_history, "product_type": adv.product_type},
-            )
-        if not adv.is_registered:
-            raise RuntimeError("Sesame5 is not registered")
-        if event_handler is not None:
-            await event_handler("connection_attempt", {})
-        async with self._logged_in(
-            scan_timeout=scan_timeout,
-            advertisement=adv,
-            event_handler=event_handler,
-            status_event_handler=status_event_handler,
-        ):
-            record = await self.read_history_current_connection(
-                handler,
-                delete_after_success=delete_after_success,
-                event_handler=event_handler,
-            )
-            if record is None:
-                raise RuntimeError("history returned no record")
-            return record
-
-    async def delete_history(self, record_id_hex: str) -> None:
-        response = await self._send_cipher(
-            ItemCode.HISTORY_DELETE, bytes.fromhex(record_id_hex)
-        )
-        self._require_success(response, "history delete")
-
     @staticmethod
     def _require_success(response: SesameResponse, command: str) -> None:
         if response.result_code != 0:
@@ -483,16 +330,6 @@ class SesameOS3Client:
     ) -> SesameResponse:
         future = self._new_response_future(item_code)
         await self._write_segmented(SegmentType.PLAIN, command_payload(item_code, data))
-        return await self._await_response(item_code, future)
-
-    async def _send_cipher(
-        self, item_code: ItemCode, data: bytes = b""
-    ) -> SesameResponse:
-        if self._cipher is None:
-            raise RuntimeError("not logged in")
-        payload = self._cipher.encrypt(command_payload(item_code, data))
-        future = self._new_response_future(item_code)
-        await self._write_segmented(SegmentType.CIPHER, payload)
         return await self._await_response(item_code, future)
 
     def _new_response_future(
@@ -545,10 +382,6 @@ class SesameOS3Client:
                 elif is_mech_status_publish(parsed.item_code):
                     if self._mechanism_status_queue is not None:
                         self._mechanism_status_queue.put_nowait(
-                            Sesame5MechanismStatus(parsed.payload)
-                        )
-                    if self._status_event_handler is not None:
-                        self._status_event_handler(
                             Sesame5MechanismStatus(parsed.payload)
                         )
                 return

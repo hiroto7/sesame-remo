@@ -1,125 +1,30 @@
 # sesame-remo
 
-Sesame5をBLEで監視するmacOS向けCLIです。Touch Pro解錠でNature Remo照明をONにするモード、施錠・解錠状態を監視して音声などを制御するモード、それらを1つのBLE接続で同時に実行するモードがあります。Wi-Fiモジュールは不要です。
-
-ICカード・指紋・暗証番号の区別はせず、Touch Pro経由の解錠をすべて対象にします。Sesameアプリや手動サムターンによる解錠は無視します。照明OFFは行いません。
+Sesame5をBLEで監視し、解錠するとNature Remoで部屋の照明をONにすると同時に、macOSの音声を再生する常駐CLIです。操作元は判定せず、Sesame5から届く`mechStatus`の解錠状態を使います。
 
 ```mermaid
 flowchart LR
-    TP["Sesame Touch Pro"] -->|"解錠"| S5["Sesame5"]
-    S5 -->|"BLE履歴"| TRIGGER["touch-pro-trigger"]
-    TRIGGER -->|"Touch Pro由来だけ"| API["Nature Cloud API"]
+    S5["Sesame5"] -->|"mechStatus"| APP["sesame-remo"]
+    APP -->|"解錠遷移"| API["Nature Cloud API"]
     API --> REMO["Nature Remo"]
     REMO -->|"赤外線"| LIGHT["照明 ON"]
-    S5 -->|"mechStatus"| MONITOR["lock-state-monitor"]
-    MONITOR --> SOUND["音声再生 / JSONログ"]
-    S5 -->|"mechStatus + BLE履歴"| COMBINED["combined-monitor"]
-    COMBINED --> SOUND
-    COMBINED --> API
+    APP --> SOUND["音声再生 / JSONログ"]
 ```
-
-## 常駐モードの選択
-
-| コマンド | 用途 | 履歴削除 | 主な出力 |
-|---|---|---:|---|
-| `touch-pro-trigger` | Touch Pro解錠を履歴から判定し、Nature Remo照明をON | 必要 | Nature Remo照明ON |
-| `lock-state-monitor` | `mechStatus`で施錠・解錠状態を監視 | 不要 | 音声再生・JSONログ |
-| `combined-monitor` | 音声とTouch Pro解錠時のNature Remo照明を同時に実行 | 必要 | 音声・Nature Remo照明・JSONログ |
-
-Touch Pro解錠だけを判定したい場合は`touch-pro-trigger`、操作元を区別せず現在の施錠状態を扱いたい場合は`lock-state-monitor`、音声と照明を同時に使う場合は`combined-monitor`を使います。`combined-monitor`は1つのSesameOS3接続で状態通知と履歴通知を処理します。1回だけ状態や履歴を確認するコマンドは後述の[確認用コマンド](#確認用コマンド)にまとめています。
 
 ## 必要なもの
 
-- 共通: Sesame5とBluetooth通信できるmacOSマシン
-- 共通: [uv](https://docs.astral.sh/uv/getting-started/installation/)
-- `touch-pro-trigger`: Sesame5とSesame Touch Pro
-- `touch-pro-trigger`: Nature Remoアプリで登録済みの照明
-- `touch-pro-trigger`: インターネット接続（Nature Cloud API用）
-- `combined-monitor`: Sesame Touch Pro、Nature Remoの照明、インターネット接続（Nature Cloud API用）
+- Sesame5とBluetooth通信できるmacOSマシン
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- Nature Remoアプリで登録済みの照明
+- Nature Cloud API Personal Access Token
 
-`lock-state-monitor`はSesame5とBluetooth通信できるMacだけで動作し、Nature Remoやインターネット接続を必要としません。
+Sesame5のBLE通信仕様を確認するときは、Candy Houseの公式SDKを参照します。
 
-Python 3.13は`.python-version`に従ってuvが管理します。システムPythonを別途用意する必要はありません。
+- [SesameSDK Android with DemoApp](https://github.com/CANDY-HOUSE/SesameSDK_Android_with_DemoApp)
+- [SesameSDK iOS with DemoApp](https://github.com/CANDY-HOUSE/SesameSDK_iOS_with_DemoApp)
+- [SesameSDK ESP32 with DemoApp](https://github.com/CANDY-HOUSE/SesameSDK_ESP32_with_DemoApp)
 
-## Sesame側の技術仕様・一次情報
-
-Sesame本体、Sesame Touch Pro、SesameOS3、BLE通信、履歴取得の仕様を確認するときは、Candy Houseの公式SesameSDKをマスタ参照先とします。
-
-- [SesameSDK Android with DemoApp](https://github.com/CANDY-HOUSE/SesameSDK_Android_with_DemoApp)：Android SDK本体と公式アプリのデモ。`sesame-sdk`配下にSesame5、Touch Pro、OS3通信、履歴処理の実装があります。
-- [SesameSDK iOS with DemoApp](https://github.com/CANDY-HOUSE/SesameSDK_iOS_with_DemoApp)：iOS SDK本体と公式アプリのデモ。`Sources`配下および`doc`を参照してください。
-- [SesameSDK ESP32 with DemoApp](https://github.com/CANDY-HOUSE/SesameSDK_ESP32_with_DemoApp)：組み込み向けの公式参照実装。ESP32-C3からSesame5へBLE接続・登録・制御するサンプルです。
-
-ESP32版は公式の公開リポジトリですが、Sesame5の制御サンプルが中心で、Touch Proや履歴取得の仕様を網羅する資料ではありません。Touch Pro・SesameOS3・履歴の詳細は、Android SDKとiOS SDKの実装も突き合わせて確認します。
-
-このリポジトリの`sesame_remo/`以下は、上記SDKのうち本アプリに必要なBLE通信、OS3暗号、Sesame5履歴取得部分をPythonへ移植したものです。仕様の根拠を確認する場合は、まず公式SDKの実装を確認し、その後に対応する[sesame_client.py](sesame_remo/sesame_client.py)、[ble_protocol.py](sesame_remo/ble_protocol.py)、[crypto.py](sesame_remo/crypto.py)、[history.py](sesame_remo/history.py)を確認してください。
-
-## セットアップの流れ
-
-初回だけ、次の順番で設定します。
-
-1. リポジトリをcloneして依存関係を入れる
-2. Sesame5のUUIDとsecret keyを取得する
-3. 選択したモードに必要な設定を行う
-4. foregroundで動作確認する
-5. LaunchAgentとして常駐させる
-
-`touch-pro-trigger`を使う場合はNature Remo設定とTouch Pro固有のsource tag採取も必要です。`lock-state-monitor`を使う場合はSesame5のUUID・secret keyだけで動作します。
-
-秘密情報はすべて`config.toml`に保存します。このファイルは`.gitignore`に含まれており、Gitには入りません。
-
-## モード別の制約
-
-### `touch-pro-trigger`
-
-Sesame5の履歴からTouch Pro経由の解錠だけを判定し、Nature Remo照明をONにします。
-
-- BLEの状態通知だけではTouch Pro・Sesameアプリ・手動サムターンを区別できないため、履歴payloadを使います。
-- BLE接続は維持し、接続中に履歴キューを継続取得します。履歴1件ごとの再接続は行いません。
-- Touch ProとSesameアプリによる解錠は`event_type=2`ですが、末尾16 byteのsource tagが異なります。
-- 手動サムターン解錠は`event_type=8`です。
-- Sesame5の履歴は先頭のレコードを削除するまで次へ進まないため、処理成功後の履歴削除が必要です。先行するOpen Sensorなどの履歴も順番に処理します。
-- 削除した履歴は、公式Sesameアプリから後で取得できない可能性があります。
-- 公式アプリが先に履歴を取得・削除すると、`touch-pro-trigger`が検出できない可能性があります。
-- 公式アプリとの同時BLE接続では、接続失敗や遅延が起こり得ます。
-
-つまり、公式アプリの履歴を保持したままTouch Proだけを確実に検出する非破壊な監視ではありません。履歴payloadの採取方法は[Touch Proの判定値を採取する](#touch-proの判定値を採取する)を参照してください。
-
-### `lock-state-monitor`
-
-操作元を区別せず、Sesame5の`mechStatus`通知で現在の施錠・解錠状態を監視します。
-
-- 履歴を読まないため、履歴削除は不要です。
-- BLE接続中は`mechStatus`通知を待ち、通知がしばらく来ないだけでは切断しません。
-- BLEクライアントの実際の切断を検出した場合だけ、対象Sesameの次の広告を使って再接続します。
-- BLE接続できない間は状態更新も遅れるため、外部機器を安全側へ戻すタイムアウトは利用側で設計してください。
-- 音声は短いファイルを`afplay`で繰り返し起動する方式で、完全なシームレスループではありません。
-- 施錠、実際のBLE切断、監視終了時には再生中の音声プロセスを停止します。
-
-状態監視の詳細は[状態遷移図](docs/status-monitor-state-machine.md)、公式SDKとの比較は[BLE再接続調査](docs/official-sdk-ble-reconnect.md)、実機で確認した事実は[実機検証記録](docs/field-verification.md)を参照してください。
-
-## 確認用コマンド
-
-現在の状態を1回だけ取得する場合:
-
-```bash
-uv run sesame-remo status-dump --config config.toml
-```
-
-履歴を1件取得する場合は、削除の有無を指定できます。詳細な採取手順は[`touch-pro-trigger`専用設定](#touch-pro-trigger専用設定)を参照してください。
-
-```bash
-uv run sesame-remo history-dump \
-  --config config.toml \
-  --no-delete-after-read
-```
-
-Sesame共有リンクを解析する場合:
-
-```bash
-pbpaste | uv run sesame-remo decode-qr
-```
-
-## インストール
+## セットアップ
 
 ```bash
 git clone https://github.com/hiroto7/sesame-remo.git
@@ -128,128 +33,29 @@ uv sync
 cp config.example.toml config.toml
 ```
 
-macOSでuvが未導入なら、Homebrewでもインストールできます。
-
-```bash
-brew install uv
-```
-
-## 共通設定
-
-SesameアプリでSesame5のownerまたはmanager共有リンクを発行し、Macのクリップボードへコピーします。guest鍵はCandy Houseサーバーによる署名が必要なため、このBLE単独版では使えません。
-
-共有リンクには鍵が含まれます。チャットやIssueへ貼らないでください。
-
-```bash
-pbpaste | uv run sesame-remo decode-qr
-```
-
-表示された2行を`config.toml`の同名項目へコピーします。
+`config.toml`へSesame5のUUID・secret keyとNature Remoの設定を記入します。`config.toml`はGit管理対象外です。
 
 ```toml
 sesame_id = "..."
 sesame_secret_key = "..."
-```
-
-## `touch-pro-trigger`専用設定
-
-### Nature Remoを設定する
-
-[Natureのアクセストークン管理画面](https://home.nature.global/)でPersonal Access Tokenを発行し、`config.toml`へ設定します。
-
-```toml
 nature_token = "..."
-```
-
-tokenをクリップボードへコピーした状態で次を実行すると、登録済みLIGHT家電の名前とappliance IDを確認できます。token自体は表示しません。
-
-```bash
-export NATURE_TOKEN="$(pbpaste)"
-curl -sS -H "Authorization: Bearer $NATURE_TOKEN" \
-  https://api.nature.global/1/appliances \
-  | uv run python -c 'import json, sys; [print(a["nickname"], a["id"]) for a in json.load(sys.stdin) if a.get("type") == "LIGHT"]'
-unset NATURE_TOKEN
-```
-
-対象照明のIDとONボタンを設定します。通常のONは`on`、全灯を使いたい場合は機種に応じて`on-100`などを指定します。
-
-```toml
 nature_light_appliance_id = "..."
 nature_light_button = "on"
 ```
 
-### Touch Proの判定値を採取する
-
-Sesame5のBLE解錠履歴では、末尾16 byteが操作元ごとに安定したsource tagとして観測できます。Touch Pro解錠を2回、Sesameアプリ解錠を1回採取し、Touch Proの2件だけで一致する値を設定します。手動解錠は別の履歴種別です。
-
-採取中はスマホのSesameアプリを完全終了するか、スマホのBluetoothをOFFにしてください。アプリが先に履歴を取得・削除するとMacから読めません。
-
-履歴を1件読むたびに次を実行します。
+## Foreground実行
 
 ```bash
-uv run sesame-remo history-dump --config config.toml --delete-after-read
+uv run sesame-remo --config config.toml
 ```
 
-施錠してから解錠した場合、施錠と解錠で2件の履歴ができるため、コマンドも2回必要です。JSONの`is_unlock`が`true`の行を比較してください。
+施錠中から解錠中へ変化すると照明がONになり、音声が再生されます。施錠、BLE切断、終了時には音声を停止します。標準出力には状態・接続・Nature APIの結果をJSON Linesで出力します。
 
-- Touch Proまたはアプリによる解錠: `event_type`は`2`
-- 手動サムターン解錠: `event_type`は`8`
-- source tag: `payload_hex`の最後の32文字（16 byte）
-
-Touch Pro解錠2件で同じ末尾32文字になり、アプリ解錠では異なることを確認したら設定します。
-
-```toml
-[touch_pro_match]
-contains_hex = ["Touch Pro履歴の末尾32文字"]
-```
-
-最後に、`touch-pro-trigger`が履歴キューを進められるよう次を変更します。
-
-```toml
-delete_history_after_read = true
-```
-
-注意: `--delete-after-read`または`touch-pro-trigger`が削除した履歴は、Sesameアプリから後で取得できなくなります。raw payloadはコマンド出力または`touch-pro-trigger`のログに残ります。
-
-## `touch-pro-trigger`のForeground動作確認
-
-```bash
-uv run sesame-remo touch-pro-trigger --config config.toml
-```
-
-照明をOFFにしてから、Sesame5を施錠し、Touch Proで解錠します。照明がONになり、次のログが出れば成功です。
-
-```text
-turned on Nature Remo light for record ...
-```
-
-Sesameアプリ解錠と手動解錠では照明がONにならないことも確認します。終了は`Ctrl-C`です。
-
-## `lock-state-monitor`のForeground動作確認
-
-```bash
-uv run sesame-remo lock-state-monitor --config config.toml
-```
-
-解錠すると音声が始まり、施錠すると停止します。標準出力には接続・切断・状態通知・状態遷移がJSON Linesで出力されます。音源を変更する場合は`--sound`、音量は`--volume`、繰り返し間隔は`--repeat-gap`で指定します。終了は`Ctrl-C`です。
-
-macOSでBluetooth利用許可が表示されたら、実行に使うターミナルを許可してください。
-
-## `combined-monitor`のForeground動作確認
-
-音声とTouch Pro解錠時の照明ONを同時に使う場合は、次を実行します。
-
-```bash
-uv run sesame-remo combined-monitor --config config.toml
-```
-
-解錠すると音声が始まり、Touch Pro解錠の場合だけNature Remoの照明もONになります。Sesameアプリ解錠や手動解錠では音声だけが動作します。`--sound`、`--volume`、`--repeat-gap`で音声設定を変更できます。終了は`Ctrl-C`です。
+音声設定は`--sound`、`--volume`、`--repeat-gap`、監視設定は`--scan-timeout`、`--poll-interval`で変更できます。
 
 ## macOSへ常駐登録する
 
-foregroundで成功した後に行います。リポジトリ直下で次を実行すると、同梱のplistへ現在の絶対パスを埋め込みます。
-
-同梱plistは`touch-pro-trigger`用です。`lock-state-monitor`または`combined-monitor`を常駐させる場合は、plist内のコマンド名を変更し、必要に応じて`--sound`などの引数を追加してください。
+foregroundで動作確認後、同梱plistの絶対パスを置き換えてLaunchAgentとして登録します。
 
 ```bash
 PROJECT_DIR="$PWD"
@@ -265,15 +71,10 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 launchctl kickstart -k "gui/$(id -u)/com.example.sesame-remo"
 ```
 
-状態確認:
+状態確認とログ確認:
 
 ```bash
 launchctl print "gui/$(id -u)/com.example.sesame-remo"
-```
-
-ログ確認:
-
-```bash
 tail -f /tmp/sesame-remo.out.log
 tail -f /tmp/sesame-remo.err.log
 ```
@@ -285,54 +86,19 @@ launchctl bootout "gui/$(id -u)" \
   "$HOME/Library/LaunchAgents/com.example.sesame-remo.plist"
 ```
 
-plistを変更した場合は、一度`bootout`してから再度`bootstrap`してください。
-
-## 設定項目
-
-| 項目 | 内容 |
-|---|---|
-| `sesame_id` | Sesame5のUUID |
-| `sesame_secret_key` | Sesame5の16-byte secret key |
-| `nature_token` | `touch-pro-trigger`/`combined-monitor`用のNature Cloud API Personal Access Token。`lock-state-monitor`では不要 |
-| `nature_light_appliance_id` | `touch-pro-trigger`/`combined-monitor`用のNature Remo LIGHT家電ID。`lock-state-monitor`では不要 |
-| `nature_light_button` | `touch-pro-trigger`/`combined-monitor`が送るLIGHTボタン。通常は`on` |
-| `cooldown_seconds` | 短時間の連続発火を抑止する秒数 |
-| `delete_history_after_read` | `touch-pro-trigger`/`combined-monitor`では`true`必須 |
-| `touch_pro_match.contains_hex` | Touch Pro解錠履歴のsource tag |
-
 ## トラブルシュート
 
-### `error: ... placeholder ...`
+### 起動時に設定エラーになる
 
-`config.toml`がサンプル値のままです。該当項目を設定してください。
+`sesame_id`、`sesame_secret_key`、`nature_token`、`nature_light_appliance_id`を確認してください。Nature Remoの照明がLIGHT家電として登録されていることも確認します。
 
-### `timed out ... with pending history`
+### 状態や照明が更新されない
 
-次を確認します。
+MacとSesame5の距離、macOSのBluetooth権限、JSONLログの`advertisement_received`、`connection_attempt`、`connected`を確認してください。
 
-- MacとSesame5の距離
-- macOSのBluetooth権限
-- `sesame_id`がSesame5のものか
-- スマホのSesameアプリが履歴を先に取得していないか
-- 操作後に新しい履歴が発生しているか
+### 音声が再生されない
 
-### `touch-pro-trigger`は動くが照明がONにならない
-
-- `nature_token`と`nature_light_appliance_id`を確認する
-- `nature_light_button`をNature Remoのボタン名に合わせる
-- `touch_pro_match.contains_hex`がTouch Pro解錠履歴の末尾32文字か確認する
-- foregroundの標準エラー、またはLaunchAgentのエラーログを確認する
-
-### `lock-state-monitor`で状態や音声が更新されない
-
-- MacとSesame5の距離、macOSのBluetooth権限を確認する
-- JSONLログの`advertisement_received`、`connection_attempt`、`connected`を確認する
-- 音声ファイルを指定した場合は、そのパスにファイルが存在するか確認する
-- `status`が受信できていても施錠状態が変わらない場合は、`state_changed`が発生しているか確認する
-
-### 同じ履歴しか読めない
-
-Sesame5の履歴はキューの先頭から読みます。次へ進むには`--delete-after-read`を付けるか、`delete_history_after_read = true`にします。
+`--sound`で指定したファイルの存在と、macOSの音声出力を確認してください。
 
 ## 開発時の確認
 
