@@ -125,7 +125,7 @@ async def test_nature_request_does_not_block_status_or_sound(
         for _ in range(100):
             if request_started.is_set():
                 break
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.01)
         assert request_started.is_set()
         assert sound_started
         assert not request_finished.is_set()
