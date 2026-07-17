@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime, timezone
+import json
 import sys
+import time
 
 from .config import load_config
-from .touch_pro_trigger import EventGate
-from .history import HistoryRecord, is_touch_pro_history
+from .touch_pro_trigger import EventGate, make_touch_pro_history_handler
+from .history import HistoryRecord
 from .key_qr import decode_sesame5_share_url
 from .nature import NatureRemoClient
-from .sesame_client import SesameOS3Client, SesameScanTimeout
+from .monitor_runner import run_monitor
+from .sesame_client import SesameOS3Client
 from .sound import DEFAULT_REPEAT_GAP, DEFAULT_SOUND_PATH, DEFAULT_VOLUME
 from .lock_state_monitor import run_lock_state_monitor
+from .status import Sesame5MechanismStatus
 
 
 async def history_dump(
@@ -65,6 +70,65 @@ async def lock_state_monitor(
     )
 
 
+async def combined_monitor(
+    config_path: str,
+    scan_timeout: float,
+    poll_interval: float,
+    sound_path: str,
+    volume: float,
+    repeat_gap: float,
+) -> int:
+    cfg = load_config(config_path)
+    _validate_touch_pro_config(cfg, "combined-monitor")
+    gate = EventGate(cfg.cooldown_seconds)
+    remo = NatureRemoClient(
+        cfg.nature_token,
+        cfg.nature_light_appliance_id,
+        cfg.nature_light_button,
+    )
+    last_unlock_transition_at: float | None = None
+    last_locked: bool | None = None
+
+    async def log_event(event: str, fields: dict[str, object] | None = None) -> None:
+        print(
+            json.dumps(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "event": event,
+                    **(fields or {}),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    async def handle_status(status: Sesame5MechanismStatus) -> None:
+        nonlocal last_unlock_transition_at
+        nonlocal last_locked
+        if last_locked is not None and last_locked and not status.is_locked:
+            last_unlock_transition_at = time.monotonic()
+        last_locked = status.is_locked
+
+    handle_history = make_touch_pro_history_handler(
+        cfg,
+        remo,
+        gate,
+        log_event,
+        lambda: last_unlock_transition_at,
+    )
+    return await run_lock_state_monitor(
+        cfg,
+        scan_timeout=scan_timeout,
+        poll_interval=poll_interval,
+        sound_path=sound_path,
+        volume=volume,
+        repeat_gap=repeat_gap,
+        history_handler=handle_history,
+        history_event_handler=log_event,
+        status_event_handler=handle_status,
+    )
+
+
 async def touch_pro_trigger(
     config_path: str, scan_timeout: float, poll_interval: float
 ) -> int:
@@ -75,59 +139,98 @@ async def touch_pro_trigger(
         cfg.nature_light_appliance_id,
         cfg.nature_light_button,
     )
+    _validate_touch_pro_config(cfg, "touch-pro-trigger")
+
+    cycle = 0
+    cycle_started_at = time.monotonic()
+    last_locked: bool | None = None
+    last_unlock_transition_at: float | None = None
+
+    async def log_event(event: str, fields: dict[str, object] | None = None) -> None:
+        print(
+            json.dumps(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "event": event,
+                    "cycle": cycle,
+                    "elapsed_seconds": time.monotonic() - cycle_started_at,
+                    **(fields or {}),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    async def handle_cycle_event(event: str, error: BaseException | None) -> None:
+        nonlocal cycle
+        nonlocal cycle_started_at
+        if event == "cycle_started":
+            cycle += 1
+            cycle_started_at = time.monotonic()
+            await log_event(event)
+        elif event == "cycle_timeout":
+            await log_event(event, {"error": str(error)})
+        elif event == "cycle_failed":
+            await log_event(event, {"error": str(error)})
+            print(f"touch-pro-trigger error: {error}", file=sys.stderr, flush=True)
+        elif event == "cycle_finished":
+            await log_event(event)
+
+    async def handle_status(status: Sesame5MechanismStatus) -> None:
+        nonlocal last_locked
+        nonlocal last_unlock_transition_at
+        fields = status.to_json_dict()
+        fields["source"] = "mechStatus"
+        await log_event("status_received", fields)
+        if last_locked is not None and last_locked != status.is_locked:
+            if not status.is_locked:
+                last_unlock_transition_at = time.monotonic()
+            await log_event(
+                "status_state_changed",
+                {"from_locked": last_locked, "to_locked": status.is_locked},
+            )
+        last_locked = status.is_locked
+
+    handle = make_touch_pro_history_handler(
+        cfg,
+        remo,
+        gate,
+        log_event,
+        lambda: last_unlock_transition_at,
+    )
+    await run_monitor(
+        cfg,
+        scan_timeout=scan_timeout,
+        poll_interval=poll_interval,
+        status_handler=handle_status,
+        history_handler=handle,
+        history_event_handler=log_event,
+        cycle_event_handler=handle_cycle_event,
+    )
+    return 0
+
+
+def _validate_touch_pro_config(cfg, command: str) -> None:
     if not cfg.touch_pro_match.contains_hex and not cfg.touch_pro_match.prefix_hex:
         raise ValueError(
-            "touch_pro_match must be configured before starting touch-pro-trigger"
+            f"touch_pro_match must be configured before starting {command}"
         )
     if not cfg.delete_history_after_read:
         raise ValueError(
-            "touch-pro-trigger requires delete_history_after_read=true "
+            f"{command} requires delete_history_after_read=true "
             "to advance the history queue"
         )
     if not cfg.nature_token or cfg.nature_token == "replace-me":
-        raise ValueError(
-            "nature_token must be configured before starting touch-pro-trigger"
-        )
+        raise ValueError(f"nature_token must be configured before starting {command}")
     if (
         not cfg.nature_light_appliance_id
         or cfg.nature_light_appliance_id == "replace-me"
     ):
         raise ValueError(
-            "nature_light_appliance_id must be configured before starting "
-            "touch-pro-trigger"
+            f"nature_light_appliance_id must be configured before starting {command}"
         )
     if not cfg.nature_light_button:
         raise ValueError("nature_light_button must not be empty")
-
-    while True:
-        try:
-            client = SesameOS3Client(cfg.sesame_id, cfg.sesame_secret_key)
-
-            async def handle(record: HistoryRecord) -> None:
-                print(record.to_json_line(), flush=True)
-                if not record.is_unlock:
-                    return
-                if not is_touch_pro_history(record.payload, cfg.touch_pro_match):
-                    return
-                if not gate.can_send(record.record_id):
-                    return
-                await asyncio.to_thread(remo.send_light_on)
-                gate.mark_sent(record.record_id)
-                print(
-                    f"turned on Nature Remo light for record {record.record_id}",
-                    flush=True,
-                )
-
-            await client.consume_history_once(
-                handle,
-                scan_timeout=scan_timeout,
-                delete_after_success=True,
-            )
-        except SesameScanTimeout:
-            pass
-        except Exception as exc:
-            print(f"touch-pro-trigger error: {exc}", file=sys.stderr, flush=True)
-        await asyncio.sleep(poll_interval)
 
 
 def decode_qr() -> int:
@@ -176,6 +279,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--scan-timeout", type=float, default=10.0)
     run.add_argument("--poll-interval", type=float, default=2.0)
 
+    combined = sub.add_parser(
+        "combined-monitor",
+        help="Play sound for unlocks and trigger Nature Remo for Touch Pro unlocks",
+    )
+    combined.add_argument("--config", required=True)
+    combined.add_argument("--scan-timeout", type=float, default=10.0)
+    combined.add_argument("--poll-interval", type=float, default=2.0)
+    combined.add_argument("--sound", default=DEFAULT_SOUND_PATH)
+    combined.add_argument("--volume", type=float, default=DEFAULT_VOLUME)
+    combined.add_argument("--repeat-gap", type=float, default=DEFAULT_REPEAT_GAP)
+
     sub.add_parser("decode-qr", help="Decode a Sesame owner/manager share URL")
     return parser
 
@@ -203,6 +317,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "touch-pro-trigger":
             return asyncio.run(
                 touch_pro_trigger(args.config, args.scan_timeout, args.poll_interval)
+            )
+        if args.command == "combined-monitor":
+            return asyncio.run(
+                combined_monitor(
+                    args.config,
+                    args.scan_timeout,
+                    args.poll_interval,
+                    args.sound,
+                    args.volume,
+                    args.repeat_gap,
+                )
             )
         if args.command == "decode-qr":
             return decode_qr()

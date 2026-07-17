@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 import uuid
 
@@ -47,6 +48,8 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
     session_key = aes_cmac(secret, token)
     history_payload = bytes.fromhex("1122334402aabb")
     events: list[str] = []
+    monitor_events: list[str] = []
+    status_events: list[bool] = []
 
     class FakeBleakClient:
         def __init__(self, _device: object, timeout: float) -> None:
@@ -74,6 +77,10 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
             if segment_type == 1:
                 assert chunk[1] == 2
                 self.callback(None, bytearray(b"\x03\x07\x02\x00"))
+                status_publish = self.peer_tx.encrypt(
+                    b"\x08\x51" + bytes.fromhex("00000000341200")
+                )
+                self.callback(None, bytearray(b"\x05" + status_publish))
                 return
 
             command = self.peer_rx.decrypt(chunk[1:])
@@ -93,20 +100,44 @@ async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) 
     async def fake_find(*, require_history: bool, scan_timeout: float):
         assert require_history
         assert scan_timeout == 1
-        return SimpleNamespace(device=object(), is_registered=True)
+        return SimpleNamespace(
+            device=object(),
+            has_history=True,
+            is_registered=True,
+            product_type=5,
+        )
 
     async def handler(record) -> None:
         events.append("handler")
         assert record.payload == history_payload
 
+    async def event_handler(event: str, _fields: dict[str, object]) -> None:
+        monitor_events.append(event)
+
+    def status_event_handler(status) -> None:
+        status_events.append(status.is_locked)
+
     monkeypatch.setattr("bleak.BleakClient", FakeBleakClient)
     monkeypatch.setattr(client, "find", fake_find)
 
     await client.consume_history_once(
-        handler, scan_timeout=1, delete_after_success=True
+        handler,
+        scan_timeout=1,
+        delete_after_success=True,
+        event_handler=event_handler,
+        status_event_handler=status_event_handler,
     )
 
     assert events == ["handler", "delete"]
+    assert monitor_events == [
+        "advertisement_received",
+        "connection_attempt",
+        "connected",
+        "history_requested",
+        "history_received",
+        "history_deleted",
+    ]
+    assert status_events == [False]
 
 
 @pytest.mark.asyncio
@@ -312,3 +343,44 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
 
     assert connection_count == 2
     assert connection_devices[1].name == "fresh"
+
+
+@pytest.mark.asyncio
+async def test_history_poll_waits_for_history_advertisement(monkeypatch) -> None:
+    client = SesameOS3Client(str(uuid.uuid4()), "00112233445566778899aabbccddeeff")
+    history_available: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+    read_count = 0
+
+    class StopPoll(Exception):
+        pass
+
+    async def fake_read_history(_handler, *, event_handler):
+        nonlocal read_count
+        assert event_handler is None
+        read_count += 1
+        if read_count == 1:
+            return None
+        raise StopPoll
+
+    monkeypatch.setattr(client, "read_history_current_connection", fake_read_history)
+
+    async def handler(_record) -> None:
+        return None
+
+    task = asyncio.create_task(
+        client._poll_history_current_connection(
+            handler,
+            event_handler=None,
+            history_available=history_available,
+        )
+    )
+    await asyncio.sleep(0)
+    assert read_count == 0
+
+    history_available.put_nowait(None)
+    await asyncio.sleep(0)
+    assert read_count == 1
+
+    history_available.put_nowait(None)
+    with pytest.raises(StopPoll):
+        await task
