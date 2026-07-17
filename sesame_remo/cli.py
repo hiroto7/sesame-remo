@@ -12,7 +12,8 @@ from .touch_pro_trigger import EventGate, make_touch_pro_history_handler
 from .history import HistoryRecord
 from .key_qr import decode_sesame5_share_url
 from .nature import NatureRemoClient
-from .sesame_client import SesameOS3Client, SesameScanTimeout
+from .monitor_runner import run_monitor
+from .sesame_client import SesameOS3Client
 from .sound import DEFAULT_REPEAT_GAP, DEFAULT_SOUND_PATH, DEFAULT_VOLUME
 from .lock_state_monitor import run_lock_state_monitor
 from .status import Sesame5MechanismStatus
@@ -141,73 +142,72 @@ async def touch_pro_trigger(
     _validate_touch_pro_config(cfg, "touch-pro-trigger")
 
     cycle = 0
+    cycle_started_at = time.monotonic()
     last_locked: bool | None = None
     last_unlock_transition_at: float | None = None
-    while True:
-        cycle += 1
-        cycle_started_at = time.monotonic()
 
-        async def log_event(
-            event: str, fields: dict[str, object] | None = None
-        ) -> None:
-            print(
-                json.dumps(
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "event": event,
-                        "cycle": cycle,
-                        "elapsed_seconds": time.monotonic() - cycle_started_at,
-                        **(fields or {}),
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
+    async def log_event(event: str, fields: dict[str, object] | None = None) -> None:
+        print(
+            json.dumps(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "event": event,
+                    "cycle": cycle,
+                    "elapsed_seconds": time.monotonic() - cycle_started_at,
+                    **(fields or {}),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    async def handle_cycle_event(event: str, error: BaseException | None) -> None:
+        nonlocal cycle
+        nonlocal cycle_started_at
+        if event == "cycle_started":
+            cycle += 1
+            cycle_started_at = time.monotonic()
+            await log_event(event)
+        elif event == "cycle_timeout":
+            await log_event(event, {"error": str(error)})
+        elif event == "cycle_failed":
+            await log_event(event, {"error": str(error)})
+            print(f"touch-pro-trigger error: {error}", file=sys.stderr, flush=True)
+        elif event == "cycle_finished":
+            await log_event(event)
+
+    async def handle_status(status: Sesame5MechanismStatus) -> None:
+        nonlocal last_locked
+        nonlocal last_unlock_transition_at
+        fields = status.to_json_dict()
+        fields["source"] = "mechStatus"
+        await log_event("status_received", fields)
+        if last_locked is not None and last_locked != status.is_locked:
+            if not status.is_locked:
+                last_unlock_transition_at = time.monotonic()
+            await log_event(
+                "status_state_changed",
+                {"from_locked": last_locked, "to_locked": status.is_locked},
             )
+        last_locked = status.is_locked
 
-        async def handle_status(status: Sesame5MechanismStatus) -> None:
-            nonlocal last_locked
-            nonlocal last_unlock_transition_at
-            fields = status.to_json_dict()
-            fields["source"] = "mechStatus"
-            await log_event("status_received", fields)
-            if last_locked is not None and last_locked != status.is_locked:
-                if not status.is_locked:
-                    last_unlock_transition_at = time.monotonic()
-                await log_event(
-                    "status_state_changed",
-                    {
-                        "from_locked": last_locked,
-                        "to_locked": status.is_locked,
-                    },
-                )
-            last_locked = status.is_locked
-
-        try:
-            await log_event("cycle_started")
-            client = SesameOS3Client(cfg.sesame_id, cfg.sesame_secret_key)
-
-            handle = make_touch_pro_history_handler(
-                cfg,
-                remo,
-                gate,
-                log_event,
-                lambda: last_unlock_transition_at,
-            )
-
-            await client.monitor_status(
-                handle_status,
-                scan_timeout=scan_timeout,
-                history_handler=handle,
-                history_event_handler=log_event,
-            )
-        except SesameScanTimeout as exc:
-            await log_event("cycle_timeout", {"error": str(exc)})
-        except Exception as exc:
-            await log_event("cycle_failed", {"error": str(exc)})
-            print(f"touch-pro-trigger error: {exc}", file=sys.stderr, flush=True)
-        finally:
-            await log_event("cycle_finished")
-        await asyncio.sleep(poll_interval)
+    handle = make_touch_pro_history_handler(
+        cfg,
+        remo,
+        gate,
+        log_event,
+        lambda: last_unlock_transition_at,
+    )
+    await run_monitor(
+        cfg,
+        scan_timeout=scan_timeout,
+        poll_interval=poll_interval,
+        status_handler=handle_status,
+        history_handler=handle,
+        history_event_handler=log_event,
+        cycle_event_handler=handle_cycle_event,
+    )
+    return 0
 
 
 def _validate_touch_pro_config(cfg, command: str) -> None:
