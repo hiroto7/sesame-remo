@@ -1,8 +1,12 @@
-# Sesame5 UUID and 16-byte secret key from an owner or manager share link.
+# Sesame5 UUID. Accepts dashed or non-dashed hex.
 sesame_id = "00000000-0000-0000-0000-000000000000"
+
+# Sesame5 OS3 secret key hex. This is the 16-byte device secret saved by the Sesame SDK/app.
 sesame_secret_key = "00000000000000000000000000000000"
 
-# Nature Remo LIGHT settings. These values are required.
+# Nature Remo Cloud API personal access token. Required for monitor.
 nature_token = "replace-me"
+
+# Nature Remo LIGHT appliance ID and button name. Required for monitor.
 nature_light_appliance_id = "replace-me"
 nature_light_button = "on"
