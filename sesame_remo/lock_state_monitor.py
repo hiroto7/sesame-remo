@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import asyncio
 import json
 import sys
 
 from .config import Config
 from .monitor_runner import (
-    HistoryEventHandler,
-    HistoryHandler,
-    StatusHandler,
     run_monitor,
 )
+from .nature import NatureRemoClient
 from .sound import MacSoundLoop
 from .status import Sesame5MechanismStatus
 
@@ -23,9 +22,6 @@ async def run_lock_state_monitor(
     sound_path: str,
     volume: float,
     repeat_gap: float,
-    history_handler: HistoryHandler | None = None,
-    history_event_handler: HistoryEventHandler | None = None,
-    status_event_handler: StatusHandler | None = None,
 ) -> int:
     sound = MacSoundLoop(
         sound_path,
@@ -35,6 +31,12 @@ async def run_lock_state_monitor(
     if not sound.sound_path.is_file():
         raise FileNotFoundError(f"sound file not found: {sound.sound_path}")
     last_locked: bool | None = None
+    nature_tasks: set[asyncio.Task[None]] = set()
+    remo = NatureRemoClient(
+        cfg.nature_token,
+        cfg.nature_light_appliance_id,
+        cfg.nature_light_button,
+    )
 
     def log_event(event: str, **fields: object) -> None:
         print(
@@ -55,10 +57,22 @@ async def run_lock_state_monitor(
         elif event == "cycle_failed":
             assert error is not None
             log_event("monitor_error", error=str(error))
-            print(f"lock-state-monitor error: {error}", file=sys.stderr, flush=True)
+            print(f"sesame-remo error: {error}", file=sys.stderr, flush=True)
 
     async def handle_connection_event(event: str) -> None:
         log_event(event)
+
+    async def send_light_on() -> None:
+        try:
+            await asyncio.to_thread(remo.send_light_on)
+        except Exception as exc:
+            log_event(
+                "nature_request_completed",
+                success=False,
+                error=str(exc),
+            )
+        else:
+            log_event("nature_request_completed", success=True)
 
     async def handle_status(status: Sesame5MechanismStatus) -> None:
         nonlocal last_locked
@@ -73,13 +87,16 @@ async def run_lock_state_monitor(
                 ),
                 to_state="locked" if status.is_locked else "unlocked",
             )
+        if last_locked is True and status.is_unlocked:
+            log_event("nature_request_started")
+            task = asyncio.create_task(send_light_on())
+            nature_tasks.add(task)
+            task.add_done_callback(nature_tasks.discard)
         last_locked = status.is_locked
         if status.is_unlocked:
             await sound.start()
         else:
             await sound.stop()
-        if status_event_handler is not None:
-            await status_event_handler(status)
 
     try:
         await run_monitor(
@@ -89,10 +106,10 @@ async def run_lock_state_monitor(
             status_handler=handle_status,
             connection_lost_handler=sound.stop,
             connection_event_handler=handle_connection_event,
-            history_handler=history_handler,
-            history_event_handler=history_event_handler,
             cycle_event_handler=handle_cycle_event,
         )
     finally:
         await sound.stop()
+        if nature_tasks:
+            await asyncio.gather(*nature_tasks, return_exceptions=True)
     return 0

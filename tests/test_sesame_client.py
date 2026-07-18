@@ -1,25 +1,20 @@
-import asyncio
-from types import SimpleNamespace
 import uuid
 
 import pytest
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
+from sesame_remo.sesame_client import SesameOS3Client, parse_sesame5_advertisement
 from sesame_remo.crypto import SesameOS3Cipher, aes_cmac
-from sesame_remo.sesame_client import (
-    SesameOS3Client,
-    parse_sesame5_advertisement,
-)
 
 
-def test_parse_sesame5_advertisement_selects_matching_manufacturer_payload() -> None:
+def test_parse_sesame5_advertisement_selects_registered_device() -> None:
     device_id = uuid.UUID("12345678-1234-5678-1234-567812345678")
-    payload = bytes([5, 0, 3]) + device_id.bytes
+    payload = bytes([5, 0, 1]) + device_id.bytes
     device = BLEDevice("test-address", "Sesame", details=None)
     advertisement = AdvertisementData(
         local_name="Sesame",
-        manufacturer_data={0x0001: b"other", 0x055A: payload},
+        manufacturer_data={0x055A: payload},
         service_data={},
         service_uuids=[],
         tx_power=None,
@@ -31,9 +26,9 @@ def test_parse_sesame5_advertisement_selects_matching_manufacturer_payload() -> 
 
     assert parsed is not None
     assert parsed.device_id == device_id
-    assert parsed.has_history
     assert parsed.is_registered
     assert parsed.product_type == 5
+    assert not hasattr(parsed, "has_history")
 
 
 def test_client_rejects_wrong_secret_key_length() -> None:
@@ -42,163 +37,7 @@ def test_client_rejects_wrong_secret_key_length() -> None:
 
 
 @pytest.mark.asyncio
-async def test_consume_history_deletes_only_after_handler_succeeds(monkeypatch) -> None:
-    secret = bytes.fromhex("00112233445566778899aabbccddeeff")
-    token = bytes.fromhex("01020304")
-    session_key = aes_cmac(secret, token)
-    history_payload = bytes.fromhex("1122334402aabb")
-    events: list[str] = []
-    monitor_events: list[str] = []
-    status_events: list[bool] = []
-
-    class FakeBleakClient:
-        def __init__(self, _device: object, timeout: float) -> None:
-            self.timeout = timeout
-            self.callback = None
-            self.peer_rx = SesameOS3Cipher(session_key, token)
-            self.peer_tx = SesameOS3Cipher(session_key, token)
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args: object) -> None:
-            return None
-
-        async def start_notify(self, _uuid: str, callback) -> None:
-            self.callback = callback
-            callback(None, bytearray(b"\x03\x08\x0e" + token))
-
-        async def write_gatt_char(
-            self, _uuid: str, chunk: bytes, response: bool
-        ) -> None:
-            assert response is False
-            assert self.callback is not None
-            segment_type = chunk[0] >> 1
-            if segment_type == 1:
-                assert chunk[1] == 2
-                self.callback(None, bytearray(b"\x03\x07\x02\x00"))
-                status_publish = self.peer_tx.encrypt(
-                    b"\x08\x51" + bytes.fromhex("00000000341200")
-                )
-                self.callback(None, bytearray(b"\x05" + status_publish))
-                return
-
-            command = self.peer_rx.decrypt(chunk[1:])
-            if command[0] == 4:
-                response_payload = b"\x07\x04\x00" + history_payload
-            elif command[0] == 18:
-                events.append("delete")
-                assert command[1:] == history_payload[:4]
-                response_payload = b"\x07\x12\x00"
-            else:
-                raise AssertionError(f"unexpected command: {command.hex()}")
-            encrypted = self.peer_tx.encrypt(response_payload)
-            self.callback(None, bytearray(b"\x05" + encrypted))
-
-    client = SesameOS3Client(str(uuid.uuid4()), secret.hex())
-
-    async def fake_find(*, require_history: bool, scan_timeout: float):
-        assert require_history
-        assert scan_timeout == 1
-        return SimpleNamespace(
-            device=object(),
-            has_history=True,
-            is_registered=True,
-            product_type=5,
-        )
-
-    async def handler(record) -> None:
-        events.append("handler")
-        assert record.payload == history_payload
-
-    async def event_handler(event: str, _fields: dict[str, object]) -> None:
-        monitor_events.append(event)
-
-    def status_event_handler(status) -> None:
-        status_events.append(status.is_locked)
-
-    monkeypatch.setattr("bleak.BleakClient", FakeBleakClient)
-    monkeypatch.setattr(client, "find", fake_find)
-
-    await client.consume_history_once(
-        handler,
-        scan_timeout=1,
-        delete_after_success=True,
-        event_handler=event_handler,
-        status_event_handler=status_event_handler,
-    )
-
-    assert events == ["handler", "delete"]
-    assert monitor_events == [
-        "advertisement_received",
-        "connection_attempt",
-        "connected",
-        "history_requested",
-        "history_received",
-        "history_deleted",
-    ]
-    assert status_events == [False]
-
-
-@pytest.mark.asyncio
-async def test_read_status_does_not_require_pending_history(monkeypatch) -> None:
-    secret = bytes.fromhex("00112233445566778899aabbccddeeff")
-    token = bytes.fromhex("01020304")
-    session_key = aes_cmac(secret, token)
-    mech_status_payload = bytes.fromhex("00000000341202")
-
-    class FakeBleakClient:
-        def __init__(self, _device: object, timeout: float) -> None:
-            self.timeout = timeout
-            self.callback = None
-            self.peer_rx = SesameOS3Cipher(session_key, token)
-            self.peer_tx = SesameOS3Cipher(session_key, token)
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args: object) -> None:
-            return None
-
-        async def start_notify(self, _uuid: str, callback) -> None:
-            self.callback = callback
-            callback(None, bytearray(b"\x03\x08\x0e" + token))
-
-        async def write_gatt_char(
-            self, _uuid: str, chunk: bytes, response: bool
-        ) -> None:
-            assert response is False
-            assert self.callback is not None
-            command = chunk[1:]
-            if chunk[0] >> 1 == 1:
-                assert command[0] == 2
-                self.callback(None, bytearray(b"\x03\x07\x02\x00"))
-                status_publish = self.peer_tx.encrypt(b"\x08\x51" + mech_status_payload)
-                self.callback(None, bytearray(b"\x05" + status_publish))
-                return
-            command = self.peer_rx.decrypt(command)
-            assert command[0] == 2
-            login_response = self.peer_tx.encrypt(b"\x07\x02\x00")
-            self.callback(None, bytearray(b"\x05" + login_response))
-
-    client = SesameOS3Client(str(uuid.uuid4()), secret.hex())
-
-    async def fake_find(*, require_history: bool, scan_timeout: float):
-        assert not require_history
-        assert scan_timeout == 1
-        return SimpleNamespace(device=object(), is_registered=True)
-
-    monkeypatch.setattr("bleak.BleakClient", FakeBleakClient)
-    monkeypatch.setattr(client, "find", fake_find)
-
-    status = await client.read_status_once(scan_timeout=1)
-
-    assert status.is_locked
-    assert status.position == 0x1234
-
-
-@pytest.mark.asyncio
-async def test_monitor_status_keeps_connection_for_publish_notifications(
+async def test_monitor_status_reconnects_only_from_fresh_advertisement(
     monkeypatch,
 ) -> None:
     secret = bytes.fromhex("00112233445566778899aabbccddeeff")
@@ -215,12 +54,12 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
         pass
 
     class FakeBleakClient:
-        def __init__(self, _device: object, timeout: float) -> None:
+        def __init__(self, device: object, timeout: float) -> None:
             nonlocal connection_count, current_connection
             connection_count += 1
             current_connection = self
-            assert isinstance(_device, BLEDevice)
-            connection_devices.append(_device)
+            assert isinstance(device, BLEDevice)
+            connection_devices.append(device)
             self.is_connected = True
             self.callback = None
             self.peer_tx = SesameOS3Cipher(session_key, token)
@@ -233,19 +72,8 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
                 assert scanner_callback is not None
                 scanner_callback(
                     BLEDevice("stale-address", "stale", details=None),
-                    AdvertisementData(
-                        local_name="Sesame",
-                        manufacturer_data={
-                            0x055A: bytes([5, 0, 1]) + client.sesame_id.bytes
-                        },
-                        service_data={},
-                        service_uuids=[],
-                        tx_power=None,
-                        rssi=-50,
-                        platform_data=(),
-                    ),
+                    _advertisement(client, "Sesame"),
                 )
-            return None
 
         async def start_notify(self, _uuid: str, callback) -> None:
             self.callback = callback
@@ -271,18 +99,10 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
             scanner_callback = callback
 
         async def start(self) -> None:
-            device = BLEDevice("test-address", "Sesame", details=None)
-            payload = bytes([5, 0, 1]) + client.sesame_id.bytes
-            advertisement = AdvertisementData(
-                local_name="Sesame",
-                manufacturer_data={0x055A: payload},
-                service_data={},
-                service_uuids=[],
-                tx_power=None,
-                rssi=-50,
-                platform_data=(),
+            self.callback(
+                BLEDevice("test-address", "Sesame", details=None),
+                _advertisement(client, "Sesame"),
             )
-            self.callback(device, advertisement)
 
         async def stop(self) -> None:
             return None
@@ -294,20 +114,9 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
         if status_count == 1:
             assert current_connection is not None
             assert scanner_callback is not None
-            # This advertisement arrives while connected and must be ignored.
             scanner_callback(
                 BLEDevice("active-address", "active", details=None),
-                AdvertisementData(
-                    local_name="Sesame",
-                    manufacturer_data={
-                        0x055A: bytes([5, 0, 1]) + client.sesame_id.bytes
-                    },
-                    service_data={},
-                    service_uuids=[],
-                    tx_power=None,
-                    rssi=-50,
-                    platform_data=(),
-                ),
+                _advertisement(client, "Sesame"),
             )
             current_connection.is_connected = False
         else:
@@ -317,18 +126,9 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
         if event != "connection_lost":
             return
         assert scanner_callback is not None
-        # Only this advertisement, received after disconnection, may reconnect.
         scanner_callback(
             BLEDevice("fresh-address", "fresh", details=None),
-            AdvertisementData(
-                local_name="fresh",
-                manufacturer_data={0x055A: bytes([5, 0, 1]) + client.sesame_id.bytes},
-                service_data={},
-                service_uuids=[],
-                tx_power=None,
-                rssi=-50,
-                platform_data=(),
-            ),
+            _advertisement(client, "fresh"),
         )
 
     monkeypatch.setattr("bleak.BleakClient", FakeBleakClient)
@@ -345,42 +145,13 @@ async def test_monitor_status_keeps_connection_for_publish_notifications(
     assert connection_devices[1].name == "fresh"
 
 
-@pytest.mark.asyncio
-async def test_history_poll_waits_for_history_advertisement(monkeypatch) -> None:
-    client = SesameOS3Client(str(uuid.uuid4()), "00112233445566778899aabbccddeeff")
-    history_available: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
-    read_count = 0
-
-    class StopPoll(Exception):
-        pass
-
-    async def fake_read_history(_handler, *, event_handler):
-        nonlocal read_count
-        assert event_handler is None
-        read_count += 1
-        if read_count == 1:
-            return None
-        raise StopPoll
-
-    monkeypatch.setattr(client, "read_history_current_connection", fake_read_history)
-
-    async def handler(_record) -> None:
-        return None
-
-    task = asyncio.create_task(
-        client._poll_history_current_connection(
-            handler,
-            event_handler=None,
-            history_available=history_available,
-        )
+def _advertisement(client: SesameOS3Client, local_name: str) -> AdvertisementData:
+    return AdvertisementData(
+        local_name=local_name,
+        manufacturer_data={0x055A: bytes([5, 0, 1]) + client.sesame_id.bytes},
+        service_data={},
+        service_uuids=[],
+        tx_power=None,
+        rssi=-50,
+        platform_data=(),
     )
-    await asyncio.sleep(0)
-    assert read_count == 0
-
-    history_available.put_nowait(None)
-    await asyncio.sleep(0)
-    assert read_count == 1
-
-    history_available.put_nowait(None)
-    with pytest.raises(StopPoll):
-        await task

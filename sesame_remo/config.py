@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 import tomllib
 import uuid
-
-
-@dataclass(frozen=True)
-class TouchProMatch:
-    contains_hex: tuple[str, ...] = ()
-    prefix_hex: str | None = None
 
 
 @dataclass(frozen=True)
@@ -19,9 +13,6 @@ class Config:
     nature_token: str = ""
     nature_light_appliance_id: str = ""
     nature_light_button: str = "on"
-    cooldown_seconds: int = 30
-    delete_history_after_read: bool = False
-    touch_pro_match: TouchProMatch = field(default_factory=TouchProMatch)
 
 
 def _clean_hex(value: str) -> str:
@@ -41,9 +32,8 @@ def _validated_hex(value: str, name: str, *, byte_length: int | None = None) -> 
     return cleaned
 
 
-def load_config(path: str | Path) -> Config:
+def load_config(path: str | Path, *, require_nature: bool = True) -> Config:
     data = tomllib.loads(Path(path).read_text())
-    matcher = data.get("touch_pro_match") or {}
     sesame_id = str(data["sesame_id"])
     try:
         parsed_sesame_id = uuid.UUID(sesame_id.replace("-", ""))
@@ -51,10 +41,6 @@ def load_config(path: str | Path) -> Config:
         raise ValueError("sesame_id must be a UUID") from exc
     if parsed_sesame_id.int == 0:
         raise ValueError("sesame_id is still the placeholder; set your Sesame5 UUID")
-
-    cooldown_seconds = int(data.get("cooldown_seconds", 30))
-    if cooldown_seconds < 0:
-        raise ValueError("cooldown_seconds must be zero or greater")
 
     secret_key = _validated_hex(
         str(data["sesame_secret_key"]), "sesame_secret_key", byte_length=16
@@ -64,23 +50,22 @@ def load_config(path: str | Path) -> Config:
             "sesame_secret_key is still the placeholder; set your Sesame5 secret key"
         )
 
+    nature_token = str(data.get("nature_token", "")).strip()
+    if require_nature and (not nature_token or nature_token == "replace-me"):
+        raise ValueError("nature_token must be configured")
+    nature_light_appliance_id = str(data.get("nature_light_appliance_id", "")).strip()
+    if require_nature and (
+        not nature_light_appliance_id or nature_light_appliance_id == "replace-me"
+    ):
+        raise ValueError("nature_light_appliance_id must be configured")
+    nature_light_button = str(data.get("nature_light_button", "on")).strip()
+    if require_nature and not nature_light_button:
+        raise ValueError("nature_light_button must not be empty")
+
     return Config(
         sesame_id=sesame_id,
         sesame_secret_key=secret_key,
-        nature_token=str(data.get("nature_token", "")),
-        nature_light_appliance_id=str(data.get("nature_light_appliance_id", "")),
-        nature_light_button=str(data.get("nature_light_button", "on")),
-        cooldown_seconds=cooldown_seconds,
-        delete_history_after_read=bool(data.get("delete_history_after_read", False)),
-        touch_pro_match=TouchProMatch(
-            contains_hex=tuple(
-                _validated_hex(v, "touch_pro_match.contains_hex")
-                for v in matcher.get("contains_hex", [])
-            ),
-            prefix_hex=(
-                _validated_hex(matcher["prefix_hex"], "touch_pro_match.prefix_hex")
-                if matcher.get("prefix_hex")
-                else None
-            ),
-        ),
+        nature_token=nature_token,
+        nature_light_appliance_id=nature_light_appliance_id,
+        nature_light_button=nature_light_button,
     )

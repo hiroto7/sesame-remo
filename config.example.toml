@@ -4,24 +4,9 @@ sesame_id = "00000000-0000-0000-0000-000000000000"
 # Sesame5 OS3 secret key hex. This is the 16-byte device secret saved by the Sesame SDK/app.
 sesame_secret_key = "00000000000000000000000000000000"
 
-# Nature Remo Cloud API personal access token.
-# Required only for touch-pro-trigger.
+# Nature Remo Cloud API personal access token. Required for monitor.
 nature_token = "replace-me"
 
-# Nature Remo LIGHT appliance ID and button name.
-# Required only for touch-pro-trigger.
+# Nature Remo LIGHT appliance ID and button name. Required for monitor.
 nature_light_appliance_id = "replace-me"
 nature_light_button = "on"
-
-cooldown_seconds = 30
-
-# Required for touch-pro-trigger. History dump can override this with --delete-after-read.
-# Deleting advances Sesame5's history queue but removes the record before the Sesame app can fetch it.
-delete_history_after_read = false
-
-# Fill this after collecting history-dump samples.
-# [touch_pro_match]
-# Patterns are matched against the event body after the 4-byte record ID.
-# For Sesame5 BLE unlock history, the final 16 bytes can be used as the
-# stable source tag after confirming it across multiple Touch Pro samples.
-# contains_hex = ["replace-with-32-hex-character-touch-pro-source-tag"]

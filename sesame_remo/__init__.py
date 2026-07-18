@@ -1,1 +1,1 @@
-"""Sesame Touch Pro -> Nature Remo automation."""
+"""Sesame5 state monitoring with Nature Remo and macOS feedback."""

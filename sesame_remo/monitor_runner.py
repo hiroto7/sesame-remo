@@ -4,14 +4,11 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from .config import Config
-from .history import HistoryRecord
 from .sesame_client import SesameOS3Client, SesameScanTimeout
 from .status import Sesame5MechanismStatus
 
 
 StatusHandler = Callable[[Sesame5MechanismStatus], Awaitable[None]]
-HistoryHandler = Callable[[HistoryRecord], Awaitable[None]]
-HistoryEventHandler = Callable[[str, dict[str, object] | None], Awaitable[None]]
 ConnectionEventHandler = Callable[[str], Awaitable[None]]
 CycleEventHandler = Callable[[str, BaseException | None], Awaitable[None]]
 
@@ -22,8 +19,6 @@ async def run_monitor(
     scan_timeout: float,
     poll_interval: float,
     status_handler: StatusHandler,
-    history_handler: HistoryHandler | None = None,
-    history_event_handler: HistoryEventHandler | None = None,
     connection_lost_handler: Callable[[], Awaitable[None]] | None = None,
     connection_event_handler: ConnectionEventHandler | None = None,
     cycle_event_handler: CycleEventHandler | None = None,
@@ -41,8 +36,6 @@ async def run_monitor(
                 scan_timeout=scan_timeout,
                 connection_lost_handler=connection_lost_handler,
                 connection_event_handler=connection_event_handler,
-                history_handler=history_handler,
-                history_event_handler=history_event_handler,
             )
         except SesameScanTimeout as exc:
             if connection_lost_handler is not None:
