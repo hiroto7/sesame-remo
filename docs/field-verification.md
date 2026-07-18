@@ -62,7 +62,7 @@
 - コミット`4eba0ae`の`monitor`をforegroundで起動
 - Sesame5とMacを同じ室内に配置
 - macOSのBluetooth統合ログで接続確立と接続パラメータ更新を観測
-- CoreBluetoothの重複広告通知を一時的に有効化し、未接続中の広告受信時刻を75秒間観測
+- 検証時のみ、診断用にCoreBluetoothの重複広告通知を一時的に有効化し（製品コードには追加していない）、未接続中の広告受信時刻を75秒間観測
 
 この検証では、PacketLogger 26.0.0のGUIとroot権限のCLIも試しました。しかし、どちらもローカルMacとの接続が確立せず、保存されたHCIログは`Disconnected from OS X Device`という記録だけでした。そのため、接続パラメータはmacOSのBluetooth統合ログから確認しています。
 
