@@ -116,7 +116,7 @@ async def test_nature_request_does_not_block_status_or_sound(
 
         def send_light_on(self) -> None:
             request_started.set()
-            release_request.wait(timeout=1)
+            release_request.wait(timeout=5)
             request_finished.set()
 
     async def fake_run_monitor(_cfg, *, status_handler, **_kwargs) -> None:
@@ -135,13 +135,16 @@ async def test_nature_request_does_not_block_status_or_sound(
     monkeypatch.setattr("sesame_remo.lock_state_monitor.NatureRemoClient", FakeRemo)
     monkeypatch.setattr("sesame_remo.lock_state_monitor.run_monitor", fake_run_monitor)
 
-    await run_lock_state_monitor(
-        _config(),
-        scan_timeout=1,
-        poll_interval=1,
-        sound_path=str(sound_path),
-        volume=0.25,
-        repeat_gap=1,
-    )
+    try:
+        await run_lock_state_monitor(
+            _config(),
+            scan_timeout=1,
+            poll_interval=1,
+            sound_path=str(sound_path),
+            volume=0.25,
+            repeat_gap=1,
+        )
+    finally:
+        release_request.set()
 
     assert request_finished.is_set()
