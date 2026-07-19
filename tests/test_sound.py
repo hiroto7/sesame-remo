@@ -64,3 +64,45 @@ async def test_sound_loop_terminates_afplay_when_stopped(monkeypatch, tmp_path) 
     await sound.stop()
 
     assert process.terminated
+
+
+@pytest.mark.asyncio
+async def test_sound_loop_kills_afplay_when_terminate_times_out(
+    monkeypatch, tmp_path
+) -> None:
+    started = asyncio.Event()
+
+    class FakeProcess:
+        returncode = None
+        terminated = False
+        killed = False
+
+        async def wait(self) -> None:
+            if self.killed:
+                return
+            await asyncio.Event().wait()
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+
+    process = FakeProcess()
+
+    async def fake_create_subprocess_exec(*_args: str):
+        started.set()
+        return process
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sesame_remo.automation.sound.PROCESS_TERMINATE_TIMEOUT", 0.01)
+    sound = MacSoundLoop(str(tmp_path / "sound.aiff"))
+    sound.sound_path.touch()
+
+    await sound.start()
+    await started.wait()
+    await sound.stop()
+
+    assert process.terminated
+    assert process.killed
