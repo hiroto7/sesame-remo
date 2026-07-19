@@ -7,18 +7,37 @@ from urllib import error, parse, request
 @dataclass(frozen=True)
 class NatureRemoClient:
     token: str
-    appliance_id: str
-    button: str = "on"
 
-    def send_light_on(self, timeout: float = 10.0) -> None:
+    def send_light_button(
+        self,
+        appliance_id: str,
+        button: str,
+        timeout: float = 10.0,
+    ) -> None:
+        self._post(
+            f"/1/appliances/{appliance_id}/light",
+            data=parse.urlencode({"button": button}).encode(),
+            timeout=timeout,
+        )
+
+    def send_signal(self, signal_id: str, timeout: float = 10.0) -> None:
+        self._post(f"/1/signals/{signal_id}/send", timeout=timeout)
+
+    def _post(
+        self,
+        path: str,
+        *,
+        data: bytes | None = None,
+        timeout: float,
+    ) -> None:
+        headers = {"Authorization": f"Bearer {self.token}"}
+        if data is not None:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
         req = request.Request(
-            f"https://api.nature.global/1/appliances/{self.appliance_id}/light",
+            f"https://api.nature.global{path}",
             method="POST",
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            data=parse.urlencode({"button": self.button}).encode(),
+            headers=headers,
+            data=data,
         )
         try:
             with request.urlopen(req, timeout=timeout) as res:

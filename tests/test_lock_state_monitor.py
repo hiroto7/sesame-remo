@@ -15,6 +15,8 @@ def _config() -> Config:
         sesame_secret_key="00112233445566778899aabbccddeeff",
         nature_token="token",
         nature_light_appliance_id="appliance",
+        nature_unlock_signal_ids=("fade-signal",),
+        nature_lock_signal_ids=("white-signal",),
     )
 
 
@@ -34,18 +36,20 @@ async def test_lock_state_monitor_rejects_missing_sound_before_monitoring(
 
 
 @pytest.mark.asyncio
-async def test_unlock_transition_turns_light_on_once(
+async def test_lock_transitions_send_configured_nature_actions_once(
     monkeypatch, tmp_path: Path
 ) -> None:
     sound_path = tmp_path / "sound.aiff"
     sound_path.touch()
     statuses = [
-        Sesame5MechanismStatus(bytes.fromhex("00000000341200")),
         Sesame5MechanismStatus(bytes.fromhex("00000000341202")),
         Sesame5MechanismStatus(bytes.fromhex("00000000341202")),
         Sesame5MechanismStatus(bytes.fromhex("00000000341200")),
+        Sesame5MechanismStatus(bytes.fromhex("00000000341200")),
+        Sesame5MechanismStatus(bytes.fromhex("00000000341202")),
     ]
-    light_calls: list[int] = []
+    light_calls: list[tuple[str, str]] = []
+    signal_calls: list[str] = []
     sound_started: list[int] = []
     sound_stopped: list[int] = []
 
@@ -63,8 +67,11 @@ async def test_unlock_transition_turns_light_on_once(
         def __init__(self, *_args) -> None:
             pass
 
-        def send_light_on(self) -> None:
-            light_calls.append(1)
+        def send_light_button(self, appliance_id: str, button: str) -> None:
+            light_calls.append((appliance_id, button))
+
+        def send_signal(self, signal_id: str) -> None:
+            signal_calls.append(signal_id)
 
     async def fake_run_monitor(_cfg, *, status_handler, **_kwargs) -> None:
         for status in statuses:
@@ -83,9 +90,10 @@ async def test_unlock_transition_turns_light_on_once(
         repeat_gap=1,
     )
 
-    assert len(light_calls) == 1
+    assert light_calls == [("appliance", "on")]
+    assert sorted(signal_calls) == ["fade-signal", "white-signal"]
     assert len(sound_started) == 2
-    assert len(sound_stopped) == 3
+    assert len(sound_stopped) == 4
 
 
 @pytest.mark.asyncio
@@ -114,10 +122,13 @@ async def test_nature_request_does_not_block_status_or_sound(
         def __init__(self, *_args) -> None:
             pass
 
-        def send_light_on(self) -> None:
+        def send_light_button(self, _appliance_id: str, _button: str) -> None:
             request_started.set()
             release_request.wait(timeout=5)
             request_finished.set()
+
+        def send_signal(self, _signal_id: str) -> None:
+            return None
 
     async def fake_run_monitor(_cfg, *, status_handler, **_kwargs) -> None:
         await status_handler(Sesame5MechanismStatus(bytes.fromhex("00000000341202")))

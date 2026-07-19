@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import asyncio
+from collections.abc import Callable
+from functools import partial
 import json
 import sys
 
@@ -32,11 +34,7 @@ async def run_lock_state_monitor(
         raise FileNotFoundError(f"sound file not found: {sound.sound_path}")
     last_locked: bool | None = None
     nature_tasks: set[asyncio.Task[None]] = set()
-    remo = NatureRemoClient(
-        cfg.nature_token,
-        cfg.nature_light_appliance_id,
-        cfg.nature_light_button,
-    )
+    remo = NatureRemoClient(cfg.nature_token)
 
     def log_event(event: str, **fields: object) -> None:
         print(
@@ -62,17 +60,56 @@ async def run_lock_state_monitor(
     async def handle_connection_event(event: str) -> None:
         log_event(event)
 
-    async def send_light_on() -> None:
+    async def send_nature_request(
+        request_type: str,
+        target_id: str,
+        operation: Callable[[], None],
+        *,
+        button: str | None = None,
+    ) -> None:
         try:
-            await asyncio.to_thread(remo.send_light_on)
+            await asyncio.to_thread(operation)
         except Exception as exc:
             log_event(
                 "nature_request_completed",
+                request_type=request_type,
+                target_id=target_id,
+                button=button,
                 success=False,
                 error=str(exc),
             )
         else:
-            log_event("nature_request_completed", success=True)
+            log_event(
+                "nature_request_completed",
+                request_type=request_type,
+                target_id=target_id,
+                button=button,
+                success=True,
+            )
+
+    def schedule_nature_request(
+        request_type: str,
+        target_id: str,
+        operation: Callable[[], None],
+        *,
+        button: str | None = None,
+    ) -> None:
+        log_event(
+            "nature_request_started",
+            request_type=request_type,
+            target_id=target_id,
+            button=button,
+        )
+        task = asyncio.create_task(
+            send_nature_request(
+                request_type,
+                target_id,
+                operation,
+                button=button,
+            )
+        )
+        nature_tasks.add(task)
+        task.add_done_callback(nature_tasks.discard)
 
     async def handle_status(status: Sesame5MechanismStatus) -> None:
         nonlocal last_locked
@@ -88,10 +125,29 @@ async def run_lock_state_monitor(
                 to_state="locked" if status.is_locked else "unlocked",
             )
         if last_locked is True and status.is_unlocked:
-            log_event("nature_request_started")
-            task = asyncio.create_task(send_light_on())
-            nature_tasks.add(task)
-            task.add_done_callback(nature_tasks.discard)
+            schedule_nature_request(
+                "light_button",
+                cfg.nature_light_appliance_id,
+                partial(
+                    remo.send_light_button,
+                    cfg.nature_light_appliance_id,
+                    cfg.nature_light_button,
+                ),
+                button=cfg.nature_light_button,
+            )
+            for signal_id in cfg.nature_unlock_signal_ids:
+                schedule_nature_request(
+                    "signal",
+                    signal_id,
+                    partial(remo.send_signal, signal_id),
+                )
+        elif last_locked is False and status.is_locked:
+            for signal_id in cfg.nature_lock_signal_ids:
+                schedule_nature_request(
+                    "signal",
+                    signal_id,
+                    partial(remo.send_signal, signal_id),
+                )
         last_locked = status.is_locked
         if status.is_unlocked:
             await sound.start()
