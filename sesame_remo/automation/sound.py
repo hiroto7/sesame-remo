@@ -8,6 +8,7 @@ from pathlib import Path
 DEFAULT_SOUND_PATH = "/System/Library/Sounds/Ping.aiff"
 DEFAULT_VOLUME = 0.25
 DEFAULT_REPEAT_GAP = 1.0
+PROCESS_TERMINATE_TIMEOUT = 5.0
 
 
 class MacSoundLoop:
@@ -67,7 +68,14 @@ class MacSoundLoop:
                         if process.returncode is None:
                             process.terminate()
                             with suppress(ProcessLookupError):
-                                await process.wait()
+                                try:
+                                    await asyncio.wait_for(
+                                        process.wait(),
+                                        timeout=PROCESS_TERMINATE_TIMEOUT,
+                                    )
+                                except TimeoutError:
+                                    process.kill()
+                                    await process.wait()
                     finally:
                         if self._process is process:
                             self._process = None

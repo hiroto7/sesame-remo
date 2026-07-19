@@ -4,8 +4,11 @@ import pytest
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
-from sesame_remo.sesame_client import SesameOS3Client, parse_sesame5_advertisement
-from sesame_remo.crypto import SesameOS3Cipher, aes_cmac
+from sesame_remo.core.crypto import SesameOS3Cipher, aes_cmac
+from sesame_remo.core.sesame_client import (
+    SesameOS3Client,
+    parse_sesame5_advertisement,
+)
 
 
 def test_parse_sesame5_advertisement_selects_registered_device() -> None:

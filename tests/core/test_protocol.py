@@ -1,11 +1,11 @@
-from sesame_remo.ble_protocol import (
+from sesame_remo.core.ble_protocol import (
     SegmentType,
     SesameBleReceiver,
     SesameResponse,
     chunks_for_transmit,
     parse_plain_notify,
 )
-from sesame_remo.crypto import counter_bytes
+from sesame_remo.core.crypto import counter_bytes
 import pytest
 
 

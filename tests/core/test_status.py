@@ -1,6 +1,6 @@
 import pytest
 
-from sesame_remo.status import Sesame5MechanismStatus, is_mech_status_publish
+from sesame_remo.core.status import Sesame5MechanismStatus, is_mech_status_publish
 
 
 def test_mechanism_status_reads_lock_flag_and_position() -> None:

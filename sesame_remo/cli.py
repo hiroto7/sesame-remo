@@ -4,11 +4,11 @@ import argparse
 import asyncio
 import sys
 
-from .config import load_config
-from .key_qr import decode_sesame5_share_url
-from .lock_state_monitor import run_lock_state_monitor
-from .sesame_client import SesameOS3Client
-from .sound import DEFAULT_REPEAT_GAP, DEFAULT_SOUND_PATH, DEFAULT_VOLUME
+from .automation import SesameRemoActions, load_config
+from .automation.sound import DEFAULT_REPEAT_GAP, DEFAULT_SOUND_PATH, DEFAULT_VOLUME
+from .core import load_sesame_config, run_lock_monitor
+from .core.key_qr import decode_sesame5_share_url
+from .core.sesame_client import SesameOS3Client
 
 
 async def monitor(
@@ -20,18 +20,31 @@ async def monitor(
     repeat_gap: float,
 ) -> int:
     cfg = load_config(config_path)
-    return await run_lock_state_monitor(
+    actions = SesameRemoActions(
         cfg,
-        scan_timeout=scan_timeout,
-        poll_interval=poll_interval,
         sound_path=sound_path,
         volume=volume,
         repeat_gap=repeat_gap,
     )
+    try:
+        await run_lock_monitor(
+            cfg.sesame,
+            scan_timeout=scan_timeout,
+            poll_interval=poll_interval,
+            on_locked=actions.on_locked,
+            on_unlocked=actions.on_unlocked,
+            on_status=actions.on_status,
+            on_connection_lost=actions.on_connection_lost,
+            connection_event_handler=actions.handle_connection_event,
+            cycle_event_handler=actions.handle_cycle_event,
+        )
+    finally:
+        await actions.close()
+    return 0
 
 
 async def status_dump(config_path: str, scan_timeout: float) -> int:
-    cfg = load_config(config_path, require_nature=False)
+    cfg = load_sesame_config(config_path)
     client = SesameOS3Client(cfg.sesame_id, cfg.sesame_secret_key)
     status = await client.read_status_once(scan_timeout=scan_timeout)
     print(status.to_json_line(), flush=True)

@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 
-from sesame_remo.key_qr import decode_sesame5_share_url
+from sesame_remo.core.key_qr import decode_sesame5_share_url
 
 
 def test_decode_sesame5_share_url() -> None:

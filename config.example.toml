@@ -10,3 +10,7 @@ nature_token = "replace-me"
 # Nature Remo LIGHT appliance ID and button name. Required for monitor.
 nature_light_appliance_id = "replace-me"
 nature_light_button = "on"
+
+# Optional custom IR signal IDs sent in array order for each Sesame5 state transition.
+nature_unlock_signal_ids = []
+nature_lock_signal_ids = []
