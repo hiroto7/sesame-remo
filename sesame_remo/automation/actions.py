@@ -75,21 +75,11 @@ class SesameRemoActions:
             ),
             button=self.cfg.nature_light_button,
         )
-        for signal_id in self.cfg.nature_unlock_signal_ids:
-            self._schedule_nature_request(
-                "signal",
-                signal_id,
-                partial(self.remo.send_signal, signal_id),
-            )
+        self._schedule_signal_sequence(self.cfg.nature_unlock_signal_ids)
         await self.sound.start()
 
     async def on_locked(self, _event: LockStateEvent) -> None:
-        for signal_id in self.cfg.nature_lock_signal_ids:
-            self._schedule_nature_request(
-                "signal",
-                signal_id,
-                partial(self.remo.send_signal, signal_id),
-            )
+        self._schedule_signal_sequence(self.cfg.nature_lock_signal_ids)
         await self.sound.stop()
 
     async def on_connection_lost(self) -> None:
@@ -139,6 +129,30 @@ class SesameRemoActions:
                 success=True,
             )
 
+    async def _send_signal_sequence(self, signal_ids: tuple[str, ...]) -> None:
+        for signal_id in signal_ids:
+            self.log_event(
+                "nature_request_started",
+                request_type="signal",
+                target_id=signal_id,
+                button=None,
+            )
+            await self._send_nature_request(
+                "signal",
+                signal_id,
+                partial(self.remo.send_signal, signal_id),
+            )
+
+    def _track_nature_task(self, task: asyncio.Task[None]) -> None:
+        self.nature_tasks.add(task)
+        task.add_done_callback(self.nature_tasks.discard)
+
+    def _schedule_signal_sequence(self, signal_ids: tuple[str, ...]) -> None:
+        if signal_ids:
+            self._track_nature_task(
+                asyncio.create_task(self._send_signal_sequence(signal_ids))
+            )
+
     def _schedule_nature_request(
         self,
         request_type: str,
@@ -153,13 +167,13 @@ class SesameRemoActions:
             target_id=target_id,
             button=button,
         )
-        task = asyncio.create_task(
-            self._send_nature_request(
-                request_type,
-                target_id,
-                operation,
-                button=button,
+        self._track_nature_task(
+            asyncio.create_task(
+                self._send_nature_request(
+                    request_type,
+                    target_id,
+                    operation,
+                    button=button,
+                )
             )
         )
-        self.nature_tasks.add(task)
-        task.add_done_callback(self.nature_tasks.discard)

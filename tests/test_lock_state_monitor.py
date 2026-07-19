@@ -19,8 +19,8 @@ def _config() -> AppConfig:
         ),
         nature_token="token",
         nature_light_appliance_id="appliance",
-        nature_unlock_signal_ids=("fade-signal",),
-        nature_lock_signal_ids=("white-signal",),
+        nature_unlock_signal_ids=("on-signal", "fade-signal"),
+        nature_lock_signal_ids=("on-signal", "white-signal"),
     )
 
 
@@ -94,7 +94,12 @@ async def test_lock_transitions_send_configured_nature_actions_once(
     await actions.close()
 
     assert light_calls == [("appliance", "on")]
-    assert sorted(signal_calls) == ["fade-signal", "white-signal"]
+    assert sorted(signal_calls) == [
+        "fade-signal",
+        "on-signal",
+        "on-signal",
+        "white-signal",
+    ]
     assert len(sound_started) == 2
     assert len(sound_stopped) == 4
 
@@ -160,3 +165,58 @@ async def test_nature_request_does_not_block_sound(monkeypatch, tmp_path: Path) 
         await actions.close()
 
     assert request_finished.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("transition", "expected"),
+    [
+        ("unlocked", ["on-signal", "fade-signal"]),
+        ("locked", ["on-signal", "white-signal"]),
+    ],
+)
+async def test_transition_signals_are_sent_in_configured_order(
+    monkeypatch, tmp_path: Path, transition: str, expected: list[str]
+) -> None:
+    sound_path = tmp_path / "sound.aiff"
+    sound_path.touch()
+    signal_calls: list[str] = []
+
+    class FakeSound:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.sound_path = sound_path
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    class FakeRemo:
+        def __init__(self, *_args) -> None:
+            pass
+
+        def send_light_button(self, _appliance_id: str, _button: str) -> None:
+            return None
+
+        def send_signal(self, signal_id: str) -> None:
+            signal_calls.append(signal_id)
+
+    monkeypatch.setattr("sesame_remo.automation.actions.MacSoundLoop", FakeSound)
+    monkeypatch.setattr("sesame_remo.automation.actions.NatureRemoClient", FakeRemo)
+
+    actions = SesameRemoActions(
+        _config(),
+        sound_path=str(sound_path),
+        volume=0.25,
+        repeat_gap=1,
+    )
+    locked = Sesame5MechanismStatus(bytes.fromhex("00000000341202"))
+    unlocked = Sesame5MechanismStatus(bytes.fromhex("00000000341200"))
+    if transition == "unlocked":
+        await actions.on_unlocked(LockStateEvent(unlocked, locked))
+    else:
+        await actions.on_locked(LockStateEvent(locked, unlocked))
+    await actions.close()
+
+    assert signal_calls == expected
