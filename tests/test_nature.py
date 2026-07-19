@@ -1,7 +1,7 @@
 from urllib import parse
 
-from sesame_remo import nature
-from sesame_remo.nature import NatureRemoClient
+from sesame_remo.automation import nature
+from sesame_remo.automation.nature import NatureRemoClient
 
 
 class FakeResponse:

@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from sesame_remo.config import load_config
+from sesame_remo.automation.config import load_config
+from sesame_remo.core.config import load_sesame_config
 
 
 def test_load_config_requires_nature_settings(tmp_path: Path) -> None:
@@ -21,6 +22,8 @@ nature_lock_signal_ids = ["white-signal"]
 
     loaded = load_config(config)
 
+    assert loaded.sesame.sesame_id == "10000000-0000-0000-0000-000000000000"
+    assert loaded.sesame.sesame_secret_key == "00112233445566778899aabbccddeeff"
     assert loaded.nature_token == "token"
     assert loaded.nature_light_appliance_id == "appliance"
     assert loaded.nature_light_button == "on-100"
@@ -40,11 +43,9 @@ sesame_secret_key = "00112233445566778899aabbccddeeff"
     with pytest.raises(ValueError, match="nature_token"):
         load_config(config)
 
-    loaded = load_config(config, require_nature=False)
-    assert loaded.nature_token == ""
-    assert loaded.nature_light_appliance_id == ""
-    assert loaded.nature_unlock_signal_ids == ()
-    assert loaded.nature_lock_signal_ids == ()
+    loaded = load_sesame_config(config)
+    assert loaded.sesame_id == "10000000-0000-0000-0000-000000000000"
+    assert loaded.sesame_secret_key == "00112233445566778899aabbccddeeff"
 
 
 def test_load_config_defaults_signal_ids_to_empty(tmp_path: Path) -> None:

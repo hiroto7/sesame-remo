@@ -4,15 +4,19 @@ import threading
 
 import pytest
 
-from sesame_remo.config import Config
-from sesame_remo.lock_state_monitor import run_lock_state_monitor
-from sesame_remo.status import Sesame5MechanismStatus
+from sesame_remo.automation.actions import SesameRemoActions
+from sesame_remo.automation.config import AppConfig
+from sesame_remo.core.config import SesameConfig
+from sesame_remo.core.monitor import LockStateEvent
+from sesame_remo.core.status import Sesame5MechanismStatus
 
 
-def _config() -> Config:
-    return Config(
-        sesame_id="10000000-0000-0000-0000-000000000000",
-        sesame_secret_key="00112233445566778899aabbccddeeff",
+def _config() -> AppConfig:
+    return AppConfig(
+        sesame=SesameConfig(
+            sesame_id="10000000-0000-0000-0000-000000000000",
+            sesame_secret_key="00112233445566778899aabbccddeeff",
+        ),
         nature_token="token",
         nature_light_appliance_id="appliance",
         nature_unlock_signal_ids=("fade-signal",),
@@ -20,15 +24,10 @@ def _config() -> Config:
     )
 
 
-@pytest.mark.asyncio
-async def test_lock_state_monitor_rejects_missing_sound_before_monitoring(
-    tmp_path: Path,
-) -> None:
+def test_actions_reject_missing_sound_before_monitoring(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="sound file not found"):
-        await run_lock_state_monitor(
+        SesameRemoActions(
             _config(),
-            scan_timeout=1,
-            poll_interval=1,
             sound_path=str(tmp_path / "missing.aiff"),
             volume=0.25,
             repeat_gap=1,
@@ -73,22 +72,26 @@ async def test_lock_transitions_send_configured_nature_actions_once(
         def send_signal(self, signal_id: str) -> None:
             signal_calls.append(signal_id)
 
-    async def fake_run_monitor(_cfg, *, status_handler, **_kwargs) -> None:
-        for status in statuses:
-            await status_handler(status)
+    monkeypatch.setattr("sesame_remo.automation.actions.MacSoundLoop", FakeSound)
+    monkeypatch.setattr("sesame_remo.automation.actions.NatureRemoClient", FakeRemo)
 
-    monkeypatch.setattr("sesame_remo.lock_state_monitor.MacSoundLoop", FakeSound)
-    monkeypatch.setattr("sesame_remo.lock_state_monitor.NatureRemoClient", FakeRemo)
-    monkeypatch.setattr("sesame_remo.lock_state_monitor.run_monitor", fake_run_monitor)
-
-    await run_lock_state_monitor(
+    actions = SesameRemoActions(
         _config(),
-        scan_timeout=1,
-        poll_interval=1,
         sound_path=str(sound_path),
         volume=0.25,
         repeat_gap=1,
     )
+    previous = None
+    for status in statuses:
+        event = LockStateEvent(status=status, previous_status=previous)
+        await actions.on_status(event)
+        if event.changed:
+            if status.is_locked:
+                await actions.on_locked(event)
+            else:
+                await actions.on_unlocked(event)
+        previous = status
+    await actions.close()
 
     assert light_calls == [("appliance", "on")]
     assert sorted(signal_calls) == ["fade-signal", "white-signal"]
@@ -97,9 +100,7 @@ async def test_lock_transitions_send_configured_nature_actions_once(
 
 
 @pytest.mark.asyncio
-async def test_nature_request_does_not_block_status_or_sound(
-    monkeypatch, tmp_path: Path
-) -> None:
+async def test_nature_request_does_not_block_sound(monkeypatch, tmp_path: Path) -> None:
     sound_path = tmp_path / "sound.aiff"
     sound_path.touch()
     request_started = threading.Event()
@@ -130,9 +131,23 @@ async def test_nature_request_does_not_block_status_or_sound(
         def send_signal(self, _signal_id: str) -> None:
             return None
 
-    async def fake_run_monitor(_cfg, *, status_handler, **_kwargs) -> None:
-        await status_handler(Sesame5MechanismStatus(bytes.fromhex("00000000341202")))
-        await status_handler(Sesame5MechanismStatus(bytes.fromhex("00000000341200")))
+    monkeypatch.setattr("sesame_remo.automation.actions.MacSoundLoop", FakeSound)
+    monkeypatch.setattr("sesame_remo.automation.actions.NatureRemoClient", FakeRemo)
+
+    actions = SesameRemoActions(
+        _config(),
+        sound_path=str(sound_path),
+        volume=0.25,
+        repeat_gap=1,
+    )
+    locked = Sesame5MechanismStatus(bytes.fromhex("00000000341202"))
+    unlocked = Sesame5MechanismStatus(bytes.fromhex("00000000341200"))
+    await actions.on_status(LockStateEvent(locked, None))
+    event = LockStateEvent(unlocked, locked)
+    await actions.on_status(event)
+    await actions.on_unlocked(event)
+
+    try:
         for _ in range(100):
             if request_started.is_set():
                 break
@@ -140,22 +155,8 @@ async def test_nature_request_does_not_block_status_or_sound(
         assert request_started.is_set()
         assert sound_started
         assert not request_finished.is_set()
-        release_request.set()
-
-    monkeypatch.setattr("sesame_remo.lock_state_monitor.MacSoundLoop", FakeSound)
-    monkeypatch.setattr("sesame_remo.lock_state_monitor.NatureRemoClient", FakeRemo)
-    monkeypatch.setattr("sesame_remo.lock_state_monitor.run_monitor", fake_run_monitor)
-
-    try:
-        await run_lock_state_monitor(
-            _config(),
-            scan_timeout=1,
-            poll_interval=1,
-            sound_path=str(sound_path),
-            volume=0.25,
-            repeat_gap=1,
-        )
     finally:
         release_request.set()
+        await actions.close()
 
     assert request_finished.is_set()

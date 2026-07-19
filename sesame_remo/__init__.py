@@ -1,1 +1,1 @@
-"""Sesame5 state monitoring with Nature Remo and macOS feedback."""
+"""Reusable Sesame5 monitoring with bundled home automation actions."""

@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from sesame_remo.sound import MacSoundLoop
+from sesame_remo.automation.sound import MacSoundLoop
 
 
 def test_sound_loop_defaults_to_stopped(tmp_path) -> None:
