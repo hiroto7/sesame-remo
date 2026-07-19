@@ -15,8 +15,8 @@ sesame_secret_key = "00112233445566778899aabbccddeeff"
 nature_token = "token"
 nature_light_appliance_id = "appliance"
 nature_light_button = "on-100"
-nature_unlock_signal_ids = ["on-signal", "fade-signal"]
-nature_lock_signal_ids = ["on-signal", "white-signal"]
+nature_unlock_signal_ids = ["on-signal", "blue-signal"]
+nature_lock_signal_ids = ["on-signal", "green-signal"]
 """.strip()
     )
 
@@ -27,8 +27,8 @@ nature_lock_signal_ids = ["on-signal", "white-signal"]
     assert loaded.nature_token == "token"
     assert loaded.nature_light_appliance_id == "appliance"
     assert loaded.nature_light_button == "on-100"
-    assert loaded.nature_unlock_signal_ids == ("on-signal", "fade-signal")
-    assert loaded.nature_lock_signal_ids == ("on-signal", "white-signal")
+    assert loaded.nature_unlock_signal_ids == ("on-signal", "blue-signal")
+    assert loaded.nature_lock_signal_ids == ("on-signal", "green-signal")
 
 
 def test_load_config_rejects_missing_nature_settings(tmp_path: Path) -> None:

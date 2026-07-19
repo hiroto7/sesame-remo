@@ -19,8 +19,8 @@ def _config() -> AppConfig:
         ),
         nature_token="token",
         nature_light_appliance_id="appliance",
-        nature_unlock_signal_ids=("on-signal", "fade-signal"),
-        nature_lock_signal_ids=("on-signal", "white-signal"),
+        nature_unlock_signal_ids=("on-signal", "blue-signal"),
+        nature_lock_signal_ids=("on-signal", "green-signal"),
     )
 
 
@@ -95,10 +95,10 @@ async def test_lock_transitions_send_configured_nature_actions_once(
 
     assert light_calls == [("appliance", "on")]
     assert sorted(signal_calls) == [
-        "fade-signal",
+        "blue-signal",
+        "green-signal",
         "on-signal",
         "on-signal",
-        "white-signal",
     ]
     assert len(sound_started) == 2
     assert len(sound_stopped) == 4
@@ -171,8 +171,8 @@ async def test_nature_request_does_not_block_sound(monkeypatch, tmp_path: Path) 
 @pytest.mark.parametrize(
     ("transition", "expected"),
     [
-        ("unlocked", ["on-signal", "fade-signal"]),
-        ("locked", ["on-signal", "white-signal"]),
+        ("unlocked", ["on-signal", "blue-signal"]),
+        ("locked", ["on-signal", "green-signal"]),
     ],
 )
 async def test_transition_signals_are_sent_in_configured_order(
