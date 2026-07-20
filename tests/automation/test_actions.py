@@ -5,7 +5,8 @@ import threading
 import pytest
 
 from sesame_remo.automation.actions import SesameRemoActions
-from sesame_remo.automation.config import AppConfig
+from sesame_remo.automation.config import AppConfig, NatureSignalRef
+from sesame_remo.automation.nature import NatureAppliance, NatureSignal
 from sesame_remo.core.config import SesameConfig
 from sesame_remo.core.monitor import LockStateEvent
 from sesame_remo.core.status import Sesame5MechanismStatus
@@ -18,9 +19,31 @@ def _config() -> AppConfig:
             sesame_secret_key="00112233445566778899aabbccddeeff",
         ),
         nature_token="token",
-        nature_light_appliance_id="appliance",
-        nature_unlock_signal_ids=("on-signal", "blue-signal"),
-        nature_lock_signal_ids=("on-signal", "green-signal"),
+        nature_light_appliance_name="主照明",
+        nature_unlock_signals=(
+            NatureSignalRef("間接照明", "オン"),
+            NatureSignalRef("間接照明", "B"),
+        ),
+        nature_lock_signals=(
+            NatureSignalRef("間接照明", "オン"),
+            NatureSignalRef("間接照明", "G"),
+        ),
+    )
+
+
+def _appliances() -> tuple[NatureAppliance, ...]:
+    return (
+        NatureAppliance("appliance", "主照明", "LIGHT", ()),
+        NatureAppliance(
+            "tape-light",
+            "間接照明",
+            "IR",
+            (
+                NatureSignal("on-signal", "オン"),
+                NatureSignal("blue-signal", "B"),
+                NatureSignal("green-signal", "G"),
+            ),
+        ),
     )
 
 
@@ -66,6 +89,9 @@ async def test_lock_transitions_send_configured_nature_actions_once(
         def __init__(self, *_args) -> None:
             pass
 
+        def get_appliances(self) -> tuple[NatureAppliance, ...]:
+            return _appliances()
+
         def send_light_button(self, appliance_id: str, button: str) -> None:
             light_calls.append((appliance_id, button))
 
@@ -81,6 +107,7 @@ async def test_lock_transitions_send_configured_nature_actions_once(
         volume=0.25,
         repeat_gap=1,
     )
+    await actions.prepare()
     previous = None
     for status in statuses:
         event = LockStateEvent(status=status, previous_status=previous)
@@ -128,6 +155,9 @@ async def test_nature_request_does_not_block_sound(monkeypatch, tmp_path: Path) 
         def __init__(self, *_args) -> None:
             pass
 
+        def get_appliances(self) -> tuple[NatureAppliance, ...]:
+            return _appliances()
+
         def send_light_button(self, _appliance_id: str, _button: str) -> None:
             request_started.set()
             release_request.wait(timeout=5)
@@ -145,6 +175,7 @@ async def test_nature_request_does_not_block_sound(monkeypatch, tmp_path: Path) 
         volume=0.25,
         repeat_gap=1,
     )
+    await actions.prepare()
     locked = Sesame5MechanismStatus(bytes.fromhex("00000000341202"))
     unlocked = Sesame5MechanismStatus(bytes.fromhex("00000000341200"))
     await actions.on_status(LockStateEvent(locked, None))
@@ -196,6 +227,9 @@ async def test_transition_signals_are_sent_in_configured_order(
         def __init__(self, *_args) -> None:
             pass
 
+        def get_appliances(self) -> tuple[NatureAppliance, ...]:
+            return _appliances()
+
         def send_light_button(self, _appliance_id: str, _button: str) -> None:
             return None
 
@@ -211,6 +245,7 @@ async def test_transition_signals_are_sent_in_configured_order(
         volume=0.25,
         repeat_gap=1,
     )
+    await actions.prepare()
     locked = Sesame5MechanismStatus(bytes.fromhex("00000000341202"))
     unlocked = Sesame5MechanismStatus(bytes.fromhex("00000000341200"))
     if transition == "unlocked":
