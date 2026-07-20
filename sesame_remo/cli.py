@@ -27,6 +27,7 @@ async def monitor(
         repeat_gap=repeat_gap,
     )
     try:
+        await actions.prepare()
         await run_lock_monitor(
             cfg.sesame,
             scan_timeout=scan_timeout,

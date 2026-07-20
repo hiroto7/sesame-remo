@@ -1,6 +1,6 @@
 import pytest
 
-from sesame_remo.automation.config import AppConfig
+from sesame_remo.automation.config import AppConfig, NatureSignalRef
 from sesame_remo.cli import build_parser, monitor, status_dump
 from sesame_remo.core.config import SesameConfig
 from sesame_remo.core.status import Sesame5MechanismStatus
@@ -37,13 +37,17 @@ async def test_monitor_composes_core_with_automation(monkeypatch, tmp_path) -> N
             sesame_secret_key="00112233445566778899aabbccddeeff",
         ),
         nature_token="token",
-        nature_light_appliance_id="appliance",
+        nature_light_appliance_name="主照明",
+        nature_unlock_signals=(NatureSignalRef("間接照明", "オン"),),
     )
     closed = False
 
     class FakeActions:
         def __init__(self, received_config, **_kwargs) -> None:
             assert received_config is config
+
+        async def prepare(self) -> None:
+            return None
 
         async def on_locked(self, _event) -> None:
             return None
@@ -85,6 +89,47 @@ async def test_monitor_composes_core_with_automation(monkeypatch, tmp_path) -> N
     monkeypatch.setattr("sesame_remo.cli.run_lock_monitor", fake_run_lock_monitor)
 
     assert await monitor("config.toml", 3, 2, str(tmp_path), 0.25, 1) == 0
+    assert closed
+
+
+@pytest.mark.asyncio
+async def test_monitor_does_not_start_when_nature_resolution_fails(
+    monkeypatch, tmp_path
+) -> None:
+    config = AppConfig(
+        sesame=SesameConfig(
+            sesame_id="10000000-0000-0000-0000-000000000000",
+            sesame_secret_key="00112233445566778899aabbccddeeff",
+        ),
+        nature_token="token",
+        nature_light_appliance_name="主照明",
+    )
+    monitor_started = False
+    closed = False
+
+    class FakeActions:
+        def __init__(self, received_config, **_kwargs) -> None:
+            assert received_config is config
+
+        async def prepare(self) -> None:
+            raise RuntimeError("Nature Remo API request failed: offline")
+
+        async def close(self) -> None:
+            nonlocal closed
+            closed = True
+
+    async def fake_run_lock_monitor(*_args, **_kwargs) -> None:
+        nonlocal monitor_started
+        monitor_started = True
+
+    monkeypatch.setattr("sesame_remo.cli.load_config", lambda _path: config)
+    monkeypatch.setattr("sesame_remo.cli.SesameRemoActions", FakeActions)
+    monkeypatch.setattr("sesame_remo.cli.run_lock_monitor", fake_run_lock_monitor)
+
+    with pytest.raises(RuntimeError, match="request failed: offline"):
+        await monitor("config.toml", 3, 2, str(tmp_path), 0.25, 1)
+
+    assert not monitor_started
     assert closed
 
 

@@ -9,7 +9,7 @@ import sys
 
 from ..core.monitor import LockStateEvent
 from .config import AppConfig
-from .nature import NatureRemoClient
+from .nature import NatureRemoClient, ResolvedNatureTargets, resolve_nature_targets
 from .sound import MacSoundLoop
 
 
@@ -33,7 +33,17 @@ class SesameRemoActions:
         if not self.sound.sound_path.is_file():
             raise FileNotFoundError(f"sound file not found: {self.sound.sound_path}")
         self.remo = NatureRemoClient(cfg.nature_token)
+        self.targets: ResolvedNatureTargets | None = None
         self.nature_tasks: set[asyncio.Task[None]] = set()
+
+    async def prepare(self) -> None:
+        appliances = await asyncio.to_thread(self.remo.get_appliances)
+        self.targets = resolve_nature_targets(self.cfg, appliances)
+
+    def _resolved_targets(self) -> ResolvedNatureTargets:
+        if self.targets is None:
+            raise RuntimeError("Nature Remo targets have not been resolved")
+        return self.targets
 
     def log_event(self, event: str, **fields: object) -> None:
         print(
@@ -65,21 +75,22 @@ class SesameRemoActions:
                 await self.sound.stop()
 
     async def on_unlocked(self, _event: LockStateEvent) -> None:
+        targets = self._resolved_targets()
         self._schedule_nature_request(
             "light_button",
-            self.cfg.nature_light_appliance_id,
+            targets.light_appliance_id,
             partial(
                 self.remo.send_light_button,
-                self.cfg.nature_light_appliance_id,
+                targets.light_appliance_id,
                 self.cfg.nature_light_button,
             ),
             button=self.cfg.nature_light_button,
         )
-        self._schedule_signal_sequence(self.cfg.nature_unlock_signal_ids)
+        self._schedule_signal_sequence(targets.unlock_signal_ids)
         await self.sound.start()
 
     async def on_locked(self, _event: LockStateEvent) -> None:
-        self._schedule_signal_sequence(self.cfg.nature_lock_signal_ids)
+        self._schedule_signal_sequence(self._resolved_targets().lock_signal_ids)
         await self.sound.stop()
 
     async def on_connection_lost(self) -> None:
