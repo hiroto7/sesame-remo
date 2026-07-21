@@ -9,6 +9,7 @@ from sesame_remo.automation.config import AppConfig, NatureSignalRef
 from sesame_remo.automation.nature import NatureAppliance, NatureSignal
 from sesame_remo.core.config import SesameConfig
 from sesame_remo.core.monitor import LockStateEvent
+from sesame_remo.core.sesame_client import SesameProtocolError
 from sesame_remo.core.status import Sesame5MechanismStatus
 
 
@@ -55,6 +56,36 @@ def test_actions_reject_missing_sound_before_monitoring(tmp_path: Path) -> None:
             volume=0.25,
             repeat_gap=1,
         )
+
+
+@pytest.mark.asyncio
+async def test_protocol_error_and_suspension_logs_are_safe(
+    tmp_path: Path, capsys
+) -> None:
+    sound_path = tmp_path / "sound.aiff"
+    sound_path.touch()
+    actions = SesameRemoActions(
+        _config(),
+        sound_path=str(sound_path),
+        volume=0.25,
+        repeat_gap=1,
+    )
+    error = SesameProtocolError(
+        "notification_processing_failed",
+        exception_type="InvalidTag",
+    )
+
+    await actions.handle_cycle_event("cycle_protocol_error", error)
+    await actions.handle_cycle_event("cycle_protocol_suspended", error)
+    await actions.close()
+
+    captured = capsys.readouterr()
+    assert '"event": "sesame_protocol_error"' in captured.out
+    assert '"reason": "notification_processing_failed"' in captured.out
+    assert '"exception_type": "InvalidTag"' in captured.out
+    assert '"event": "monitor_suspended"' in captured.out
+    assert "00112233445566778899aabbccddeeff" not in captured.out
+    assert "sesame-remo monitoring suspended" in captured.err
 
 
 @pytest.mark.asyncio

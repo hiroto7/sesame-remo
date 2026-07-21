@@ -8,6 +8,7 @@ import json
 import sys
 
 from ..core.monitor import LockStateEvent
+from ..core.sesame_client import SesameProtocolError
 from .config import AppConfig
 from .nature import NatureRemoClient, ResolvedNatureTargets, resolve_nature_targets
 from .sound import MacSoundLoop
@@ -102,6 +103,27 @@ class SesameRemoActions:
     async def handle_cycle_event(self, event: str, error: BaseException | None) -> None:
         if event == "cycle_timeout":
             self.log_event("monitor_timeout")
+        elif event == "cycle_protocol_error":
+            assert isinstance(error, SesameProtocolError)
+            self.log_event(
+                "sesame_protocol_error",
+                reason=error.reason,
+                exception_type=error.exception_type,
+            )
+            print(f"sesame-remo error: {error}", file=sys.stderr, flush=True)
+        elif event == "cycle_protocol_suspended":
+            assert isinstance(error, SesameProtocolError)
+            self.log_event(
+                "monitor_suspended",
+                reason=error.reason,
+                recovery="close the official Sesame app and restart sesame-remo",
+            )
+            print(
+                "sesame-remo monitoring suspended: close the official Sesame app "
+                "and restart sesame-remo",
+                file=sys.stderr,
+                flush=True,
+            )
         elif event == "cycle_failed":
             assert error is not None
             self.log_event("monitor_error", error=str(error))
