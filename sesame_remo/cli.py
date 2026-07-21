@@ -9,6 +9,13 @@ from .automation.sound import DEFAULT_REPEAT_GAP, DEFAULT_SOUND_PATH, DEFAULT_VO
 from .core import load_sesame_config, run_lock_monitor
 from .core.key_qr import decode_sesame5_share_url
 from .core.sesame_client import SesameOS3Client
+from .macos_service import (
+    DEFAULT_SERVICE_LABEL,
+    install_service,
+    service_status,
+    service_target,
+    uninstall_service,
+)
 
 
 async def monitor(
@@ -62,6 +69,34 @@ def decode_qr() -> int:
     return 0
 
 
+def install_macos_service(config_path: str, label: str) -> int:
+    plist_path = install_service(config_path, label=label)
+    print(f"installed: {service_target(label)}")
+    print(f"plist: {plist_path}")
+    return 0
+
+
+def uninstall_macos_service(label: str) -> int:
+    if uninstall_service(label=label):
+        print(f"uninstalled: {service_target(label)}")
+    else:
+        print(f"not installed: {service_target(label)}")
+    return 0
+
+
+def show_macos_service_status(label: str) -> int:
+    result = service_status(label=label)
+    if result.returncode == 0:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+        return 0
+    print(f"not installed: {service_target(label)}")
+    print(
+        "install with: sesame-remo service install --config config.toml"
+        + (f" --label {label}" if label != DEFAULT_SERVICE_LABEL else "")
+    )
+    return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sesame-remo")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -79,6 +114,21 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--scan-timeout", type=float, default=10.0)
 
     sub.add_parser("decode-qr", help="Decode a Sesame owner/manager share URL")
+
+    service = sub.add_parser("service", help="Manage the macOS LaunchAgent")
+    service_sub = service.add_subparsers(dest="service_command", required=True)
+
+    install = service_sub.add_parser("install", help="Install and start the service")
+    install.add_argument("--config", required=True)
+    install.add_argument("--label", default=DEFAULT_SERVICE_LABEL)
+
+    uninstall = service_sub.add_parser("uninstall", help="Stop and remove the service")
+    uninstall.add_argument("--label", default=DEFAULT_SERVICE_LABEL)
+
+    service_status_parser = service_sub.add_parser(
+        "status", help="Show the service status"
+    )
+    service_status_parser.add_argument("--label", default=DEFAULT_SERVICE_LABEL)
     return parser
 
 
@@ -100,6 +150,13 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(status_dump(args.config, args.scan_timeout))
         if args.command == "decode-qr":
             return decode_qr()
+        if args.command == "service":
+            if args.service_command == "install":
+                return install_macos_service(args.config, args.label)
+            if args.service_command == "uninstall":
+                return uninstall_macos_service(args.label)
+            if args.service_command == "status":
+                return show_macos_service_status(args.label)
     except KeyboardInterrupt:
         return 130
     except Exception as exc:

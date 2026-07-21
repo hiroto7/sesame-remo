@@ -1,7 +1,14 @@
+import subprocess
+
 import pytest
 
 from sesame_remo.automation.config import AppConfig, NatureSignalRef
-from sesame_remo.cli import build_parser, monitor, status_dump
+from sesame_remo.cli import (
+    build_parser,
+    monitor,
+    show_macos_service_status,
+    status_dump,
+)
 from sesame_remo.core.config import SesameConfig
 from sesame_remo.core.status import Sesame5MechanismStatus
 
@@ -27,6 +34,43 @@ def test_decode_qr_parser() -> None:
     args = build_parser().parse_args(["decode-qr"])
 
     assert args.command == "decode-qr"
+
+
+def test_service_install_parser_defaults() -> None:
+    args = build_parser().parse_args(["service", "install", "--config", "config.toml"])
+
+    assert args.command == "service"
+    assert args.service_command == "install"
+    assert args.config == "config.toml"
+    assert args.label == "com.example.sesame-remo"
+
+
+def test_service_uninstall_parser_accepts_custom_label() -> None:
+    args = build_parser().parse_args(
+        ["service", "uninstall", "--label", "com.hiroto.sesame-remo"]
+    )
+
+    assert args.service_command == "uninstall"
+    assert args.label == "com.hiroto.sesame-remo"
+
+
+def test_service_status_parser_defaults() -> None:
+    args = build_parser().parse_args(["service", "status"])
+
+    assert args.service_command == "status"
+    assert args.label == "com.example.sesame-remo"
+
+
+def test_service_status_explains_how_to_install(monkeypatch, capsys) -> None:
+    result = subprocess.CompletedProcess(
+        ["launchctl", "print"], returncode=113, stdout="", stderr="not found"
+    )
+    monkeypatch.setattr("sesame_remo.cli.service_status", lambda **_kwargs: result)
+
+    assert show_macos_service_status("com.example.sesame-remo") == 1
+    output = capsys.readouterr().out
+    assert "not installed: gui/" in output
+    assert "sesame-remo service install --config config.toml" in output
 
 
 @pytest.mark.asyncio

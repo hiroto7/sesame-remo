@@ -149,26 +149,16 @@ macOSでBluetooth利用許可が表示されたら、実行に使うターミナ
 
 ## macOSへ常駐登録する
 
-foregroundで成功した後に行います。リポジトリ直下で次を実行すると、同梱のplistへ現在の絶対パスを埋め込みます。
+foregroundで成功した後に行います。次のコマンドは設定ファイルを検証し、現在のPythonと設定ファイルの絶対パスを埋め込んだLaunchAgentを登録して起動します。すでに登録済みの場合は、いったん停止して新しい内容へ更新します。
 
 ```bash
-PROJECT_DIR="$PWD"
-PLIST="$HOME/Library/LaunchAgents/com.example.sesame-remo.plist"
-mkdir -p "$HOME/Library/LaunchAgents"
-sed \
-  -e "s|/absolute/path/to/.venv/bin/python|$PROJECT_DIR/.venv/bin/python|" \
-  -e "s|/absolute/path/to/config.toml|$PROJECT_DIR/config.toml|" \
-  -e "s|/absolute/path/to/project|$PROJECT_DIR|" \
-  launchd/com.example.sesame-remo.plist > "$PLIST"
-plutil -lint "$PLIST"
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
-launchctl kickstart -k "gui/$(id -u)/com.example.sesame-remo"
+uv run sesame-remo service install --config config.toml
 ```
 
 状態確認:
 
 ```bash
-launchctl print "gui/$(id -u)/com.example.sesame-remo"
+uv run sesame-remo service status
 ```
 
 ログ確認:
@@ -181,11 +171,24 @@ tail -f /tmp/sesame-remo.err.log
 停止・登録解除:
 
 ```bash
-launchctl bootout "gui/$(id -u)" \
-  "$HOME/Library/LaunchAgents/com.example.sesame-remo.plist"
+uv run sesame-remo service uninstall
 ```
 
-plistを変更した場合は、一度`bootout`してから再度`bootstrap`してください。
+サービスラベルの既定値は`com.example.sesame-remo`です。既存環境で別のラベルを使っている場合は、すべてのサービス管理コマンドへ同じ`--label`を指定してください。異なるラベルで登録されたサービスは自動的には削除されません。
+
+```bash
+uv run sesame-remo service install \
+  --config config.toml \
+  --label com.hiroto.sesame-remo
+uv run sesame-remo service status --label com.hiroto.sesame-remo
+uv run sesame-remo service uninstall --label com.hiroto.sesame-remo
+```
+
+詳細を直接確認する場合は、次の`launchctl`コマンドも利用できます。
+
+```bash
+launchctl print "gui/$(id -u)/com.example.sesame-remo"
+```
 
 ## 設定項目
 
