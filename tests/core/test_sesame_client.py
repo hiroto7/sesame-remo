@@ -1,14 +1,19 @@
+import asyncio
+from typing import cast
 import uuid
 
 import pytest
+from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
 from sesame_remo.core.crypto import SesameOS3Cipher, aes_cmac
 from sesame_remo.core.sesame_client import (
     SesameOS3Client,
+    SesameProtocolError,
     parse_sesame5_advertisement,
 )
+from sesame_remo.core.status import Sesame5MechanismStatus
 
 
 def test_parse_sesame5_advertisement_selects_registered_device() -> None:
@@ -37,6 +42,53 @@ def test_parse_sesame5_advertisement_selects_registered_device() -> None:
 def test_client_rejects_wrong_secret_key_length() -> None:
     with pytest.raises(ValueError, match="16 bytes"):
         SesameOS3Client("12345678-1234-5678-1234-567812345678", "0011")
+
+
+@pytest.mark.asyncio
+async def test_logged_in_client_detects_replacement_initial() -> None:
+    client = SesameOS3Client(
+        "12345678-1234-5678-1234-567812345678",
+        "00112233445566778899aabbccddeeff",
+    )
+    initial_token = asyncio.get_running_loop().create_future()
+    initial_token.set_result(bytes.fromhex("01020304"))
+    client._initial_token = initial_token
+    client._session_authenticated = True
+    client._client = cast(BleakClient, _ConnectedClient())
+    queue: asyncio.Queue[Sesame5MechanismStatus] = asyncio.Queue()
+
+    client._on_notify(None, bytearray(b"\x03\x08\x0e\x05\x06\x07\x08"))
+
+    with pytest.raises(SesameProtocolError) as exc_info:
+        await client._next_status_until_disconnected(queue)
+
+    assert exc_info.value.reason == "session_replaced"
+    assert exc_info.value.exception_type is None
+
+
+@pytest.mark.asyncio
+async def test_notification_decryption_error_reaches_status_monitor() -> None:
+    token = bytes.fromhex("01020304")
+    client = SesameOS3Client(
+        "12345678-1234-5678-1234-567812345678",
+        "00112233445566778899aabbccddeeff",
+    )
+    client._cipher = SesameOS3Cipher(bytes.fromhex("11" * 16), token)
+    client._session_authenticated = True
+    client._client = cast(BleakClient, _ConnectedClient())
+    queue: asyncio.Queue[Sesame5MechanismStatus] = asyncio.Queue()
+    ciphertext = SesameOS3Cipher(bytes.fromhex("22" * 16), token).encrypt(
+        b"\x08\x51" + bytes.fromhex("00000000341200")
+    )
+
+    client._on_notify(None, bytearray(b"\x05" + ciphertext))
+
+    with pytest.raises(SesameProtocolError) as exc_info:
+        await client._next_status_until_disconnected(queue)
+
+    assert exc_info.value.reason == "notification_processing_failed"
+    assert exc_info.value.exception_type == "InvalidTag"
+    assert ciphertext.hex() not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -158,3 +210,7 @@ def _advertisement(client: SesameOS3Client, local_name: str) -> AdvertisementDat
         rssi=-50,
         platform_data=(),
     )
+
+
+class _ConnectedClient:
+    is_connected = True
