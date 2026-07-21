@@ -59,9 +59,7 @@ def test_actions_reject_missing_sound_before_monitoring(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_protocol_error_and_suspension_logs_are_safe(
-    tmp_path: Path, capsys
-) -> None:
+async def test_protocol_error_and_stop_logs_are_safe(tmp_path: Path, capsys) -> None:
     sound_path = tmp_path / "sound.aiff"
     sound_path.touch()
     actions = SesameRemoActions(
@@ -76,16 +74,16 @@ async def test_protocol_error_and_suspension_logs_are_safe(
     )
 
     await actions.handle_cycle_event("cycle_protocol_error", error)
-    await actions.handle_cycle_event("cycle_protocol_suspended", error)
+    await actions.handle_cycle_event("cycle_protocol_stopped", error)
     await actions.close()
 
     captured = capsys.readouterr()
     assert '"event": "sesame_protocol_error"' in captured.out
     assert '"reason": "notification_processing_failed"' in captured.out
     assert '"exception_type": "InvalidTag"' in captured.out
-    assert '"event": "monitor_suspended"' in captured.out
+    assert '"event": "monitor_stopped"' in captured.out
     assert "00112233445566778899aabbccddeeff" not in captured.out
-    assert "sesame-remo monitoring suspended" in captured.err
+    assert "sesame-remo monitoring stopped" in captured.err
 
 
 @pytest.mark.asyncio

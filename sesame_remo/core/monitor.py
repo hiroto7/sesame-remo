@@ -86,7 +86,7 @@ async def run_lock_monitor(
             await on_unlocked(event)
 
     while True:
-        suspend_monitor = False
+        stop_monitor = False
         if cycle_event_handler is not None:
             await cycle_event_handler("cycle_started", None)
         try:
@@ -102,10 +102,10 @@ async def run_lock_monitor(
                 await on_connection_lost()
             if cycle_event_handler is not None:
                 await cycle_event_handler("cycle_protocol_error", exc)
-            if protocol_retry_pending:
-                suspend_monitor = True
+            if exc.reason == "session_replaced" or protocol_retry_pending:
+                stop_monitor = True
                 if cycle_event_handler is not None:
-                    await cycle_event_handler("cycle_protocol_suspended", exc)
+                    await cycle_event_handler("cycle_protocol_stopped", exc)
             else:
                 protocol_retry_pending = True
         except SesameScanTimeout as exc:
@@ -121,6 +121,6 @@ async def run_lock_monitor(
         finally:
             if cycle_event_handler is not None:
                 await cycle_event_handler("cycle_finished", None)
-        if suspend_monitor:
-            await asyncio.Event().wait()
+        if stop_monitor:
+            return
         await asyncio.sleep(poll_interval)

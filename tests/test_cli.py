@@ -1,9 +1,21 @@
+import plistlib
+from pathlib import Path
+
 import pytest
 
 from sesame_remo.automation.config import AppConfig, NatureSignalRef
 from sesame_remo.cli import build_parser, monitor, status_dump
 from sesame_remo.core.config import SesameConfig
 from sesame_remo.core.status import Sesame5MechanismStatus
+
+
+def test_launch_agent_restarts_only_after_unsuccessful_exit() -> None:
+    plist_path = Path(__file__).parents[1] / "launchd" / "com.example.sesame-remo.plist"
+    with plist_path.open("rb") as plist_file:
+        launch_agent = plistlib.load(plist_file)
+
+    assert launch_agent["RunAtLoad"] is True
+    assert launch_agent["KeepAlive"] == {"SuccessfulExit": False}
 
 
 def test_monitor_parser_defaults() -> None:
