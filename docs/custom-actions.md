@@ -37,4 +37,6 @@ asyncio.run(main())
 
 `on_unlocked`と`on_locked`は、初回状態や同じ状態の重複通知では呼ばれません。すべての状態通知が必要な場合は`on_status`、切断時の後始末が必要な場合は`on_connection_lost`も指定できます。
 
+`run_lock_monitor`は通常の切断やスキャンタイムアウトでは再試行を続けますが、安全に継続できないプロトコル異常ではcallbackへ停止イベントを通知してreturnします。常駐プロセスとして使う場合は、正常returnを無条件に再起動しないようプロセス管理側も設定してください。同梱のLaunchAgent plistは異常終了時だけ再起動します。
+
 callbackは通知順にawaitされます。時間のかかる外部APIを状態監視と並行して実行したい場合は、利用側で`asyncio.create_task`などを使い、終了時に未完了タスクを回収してください。同梱の`sesame_remo.automation.SesameRemoActions`がその実装例です。

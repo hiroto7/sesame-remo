@@ -1,6 +1,3 @@
-import asyncio
-from collections.abc import Callable
-
 import pytest
 
 from sesame_remo.core.config import SesameConfig
@@ -88,7 +85,7 @@ def test_core_config_has_no_automation_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_protocol_error_retries_once_then_suspends(monkeypatch) -> None:
+async def test_session_replaced_stops_without_retry(monkeypatch) -> None:
     client_count = 0
     cycle_events: list[str] = []
 
@@ -104,29 +101,54 @@ async def test_protocol_error_retries_once_then_suspends(monkeypatch) -> None:
         cycle_events.append(event)
 
     monkeypatch.setattr("sesame_remo.core.monitor.SesameOS3Client", FakeClient)
-    task = asyncio.create_task(
-        run_lock_monitor(
-            SesameConfig(
-                sesame_id="10000000-0000-0000-0000-000000000000",
-                sesame_secret_key="00112233445566778899aabbccddeeff",
-            ),
-            scan_timeout=1,
-            poll_interval=0,
-            cycle_event_handler=handle_cycle,
-        )
+    await run_lock_monitor(
+        SesameConfig(
+            sesame_id="10000000-0000-0000-0000-000000000000",
+            sesame_secret_key="00112233445566778899aabbccddeeff",
+        ),
+        scan_timeout=1,
+        poll_interval=0,
+        cycle_event_handler=handle_cycle,
     )
 
-    try:
-        await asyncio.wait_for(
-            _wait_until(lambda: "cycle_protocol_suspended" in cycle_events),
-            timeout=1,
-        )
-        assert client_count == 2
-        assert cycle_events.count("cycle_protocol_error") == 2
-        assert not task.done()
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+    assert client_count == 1
+    assert cycle_events.count("cycle_protocol_error") == 1
+    assert cycle_events.count("cycle_protocol_stopped") == 1
+
+
+@pytest.mark.asyncio
+async def test_notification_processing_failure_retries_once_then_stops(
+    monkeypatch,
+) -> None:
+    client_count = 0
+    cycle_events: list[str] = []
+
+    class FakeClient:
+        def __init__(self, _sesame_id: str, _secret_key: str) -> None:
+            nonlocal client_count
+            client_count += 1
+
+        async def monitor_status(self, _status_handler, **_kwargs) -> None:
+            raise SesameProtocolError("notification_processing_failed")
+
+    async def handle_cycle(event: str, _error: BaseException | None) -> None:
+        cycle_events.append(event)
+
+    monkeypatch.setattr("sesame_remo.core.monitor.SesameOS3Client", FakeClient)
+
+    await run_lock_monitor(
+        SesameConfig(
+            sesame_id="10000000-0000-0000-0000-000000000000",
+            sesame_secret_key="00112233445566778899aabbccddeeff",
+        ),
+        scan_timeout=1,
+        poll_interval=0,
+        cycle_event_handler=handle_cycle,
+    )
+
+    assert client_count == 2
+    assert cycle_events.count("cycle_protocol_error") == 2
+    assert cycle_events.count("cycle_protocol_stopped") == 1
 
 
 @pytest.mark.asyncio
@@ -145,7 +167,7 @@ async def test_status_after_protocol_retry_reenables_one_retry(monkeypatch) -> N
 
         async def monitor_status(self, status_handler, **_kwargs) -> None:
             if self.number == 1:
-                raise SesameProtocolError("session_replaced")
+                raise SesameProtocolError("notification_processing_failed")
             if self.number == 2:
                 await status_handler(status)
                 raise SesameProtocolError("notification_processing_failed")
@@ -218,8 +240,3 @@ async def test_run_lock_monitor_preserves_state_across_reconnects(monkeypatch) -
     assert client_count == 2
     assert len(unlocked) == 1
     assert unlocked[0].previous_status is locked_status
-
-
-async def _wait_until(predicate: Callable[[], bool]) -> None:
-    while not predicate():
-        await asyncio.sleep(0)

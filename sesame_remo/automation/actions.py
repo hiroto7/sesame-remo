@@ -111,15 +111,15 @@ class SesameRemoActions:
                 exception_type=error.exception_type,
             )
             print(f"sesame-remo error: {error}", file=sys.stderr, flush=True)
-        elif event == "cycle_protocol_suspended":
+        elif event == "cycle_protocol_stopped":
             assert isinstance(error, SesameProtocolError)
             self.log_event(
-                "monitor_suspended",
+                "monitor_stopped",
                 reason=error.reason,
                 recovery="close the official Sesame app and restart sesame-remo",
             )
             print(
-                "sesame-remo monitoring suspended: close the official Sesame app "
+                "sesame-remo monitoring stopped: close the official Sesame app "
                 "and restart sesame-remo",
                 file=sys.stderr,
                 flush=True,
