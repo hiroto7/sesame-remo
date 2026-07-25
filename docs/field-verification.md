@@ -13,6 +13,7 @@
 | 古い広告を破棄する実装 | [`c038c93`](https://github.com/hiroto7/sesame-remo/commit/c038c93) | 切断処理中の広告を次回接続に使わない修正。 |
 | 施錠時に音声を停止する実装 | [`bd75b15`](https://github.com/hiroto7/sesame-remo/commit/bd75b15) | 再生中の`afplay`を終了する修正。 |
 | BLE通信間隔の実機検証 | [`4eba0ae`](https://github.com/hiroto7/sesame-remo/commit/4eba0ae) | `monitor`接続時のBLE広告送信間隔とBLE接続間隔を測定した対象。 |
+| セッション異常検知の実機検証 | [`9ee0d92`](https://github.com/hiroto7/sesame-remo/commit/9ee0d92) | 同じMac上の公式Sesameアプリによるセッション置換の検知と、別デバイスとの同時利用を確認した対象。このコミットは検証のため1回再接続するが、その後の実装では安全のため`session_replaced`時に停止する。 |
 
 過去の検証結果を再現する場合は、各検証に記載したコミットをcheckoutしてください。現在の実装の挙動を確認する場合は、最新のブランチを使用してください。
 
@@ -109,6 +110,41 @@ BLE広告送信間隔の約1,028 msは、安定接続後のBLE接続間隔360 ms
 
 したがって、この検証から確認できるのは無線イベントの間隔までです。未接続時と接続中の平均消費電流を比較するには、Sesameの電源ラインで電流波形と平均電流を測定する必要があります。
 
+## 2026-07-21: 公式Sesameアプリとの同時利用
+
+### 検証条件
+
+- コミット`9ee0d92`の`monitor`をMacでforeground起動
+- 同じMac上の公式Sesameアプリ、別のAndroid端末、別のiPadから同じSesame5へ接続・操作
+- `sesame-remo`のJSON LinesログとmacOSのBluetooth統合ログを照合
+- Android・iPadについては`sesame-remo`の状態通知とNature Remo操作の成否を確認
+
+### 同じMac上の公式Sesameアプリ
+
+`sesame-remo`がログイン済みの状態で公式Sesameアプリを起動すると、macOSは公式アプリの接続要求に対して、対象Sesameがすでに接続済みであると記録しました。公式アプリはその既存BLE接続へ参加し、GATT characteristicへ書き込みました。その直後、`sesame-remo`は新しい`initial`を受信し、`session_replaced`として検知しました。
+
+最初の試行で観測した時系列:
+
+```text
+20:28:09.295 公式SesameアプリがBLEスキャン開始
+20:29:07.840 対象Sesameの広告に一致
+20:29:07.841 公式アプリが既存BLE接続へ参加
+20:29:07.939 公式アプリがGATT characteristicへ書き込み開始
+20:29:08.500 sesame-remoがsession_replacedを記録
+```
+
+公式アプリが対象を発見するまで約59秒かかりましたが、接続要求から異常検知までは約0.66秒でした。検証対象コミットは異常後に1回再接続し、`sesame-remo`自身は正常な状態通知を再び受信できました。一方、その再接続後は公式Macアプリの施錠・解錠ボタンが反応せず、アプリを再起動するまで復旧しませんでした。
+
+別の試行でも、公式Macアプリの接続・GATT書き込み直後に`session_replaced`を検知しました。iPadアプリの起動と同時期でしたが、MacのBluetooth統合ログで直接確認できた置換元は同じMac上の公式アプリです。
+
+この結果を受け、現行実装は`session_replaced`時に再接続せず正常終了します。再接続によって公式アプリ側のセッションを再び無効化することと、双方の再認証ループを避けるためです。
+
+### 別のAndroid端末とiPad
+
+Android端末とiPadの公式Sesameアプリから施錠・解錠した試行では、アプリからの操作、`sesame-remo`の状態通知、Nature Remo操作がいずれも成功し、`session_replaced`は記録されませんでした。
+
+この観測は、同じMac上でCoreBluetoothが既存BLE接続を複数クライアントへ共有する場合に競合が起き、別端末からの独立したBLE接続では同じ競合が起きなかった、という説明と整合します。ただし、Sesameの複数接続仕様を無線パケットまたはファームウェア仕様で確認したものではありません。異なる端末、OS、公式アプリやSesameファームウェアのバージョンでも常に共存できるとは断定しません。
+
 ## 音声再生の検証
 
 当時の`status-daemon`（現行の`monitor`に相当）の音声は、macOSの`afplay`で指定ファイルを1回再生し、終了したら再度`afplay`を起動する方式です。音声ファイル自体を内部的にシームレスループしているわけではありません。
@@ -129,3 +165,4 @@ BLE広告送信間隔の約1,028 msは、安定接続後のBLE接続間隔360 ms
 - 長時間運転での接続維持時間
 - 音声ファイルごとの無音時間とループのつながり方
 - Nature API実行中の連続した施錠・解錠操作
+- 異なる端末・OS・公式アプリバージョンでの同時BLE接続

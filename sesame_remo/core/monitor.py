@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from .config import SesameConfig
-from .sesame_client import SesameOS3Client, SesameScanTimeout
+from .sesame_client import SesameOS3Client, SesameProtocolError, SesameScanTimeout
 from .status import Sesame5MechanismStatus
 
 
@@ -67,9 +67,11 @@ async def run_lock_monitor(
         raise ValueError("poll_interval must not be negative")
 
     previous_status: Sesame5MechanismStatus | None = None
+    protocol_retry_pending = False
 
     async def handle_status(status: Sesame5MechanismStatus) -> None:
-        nonlocal previous_status
+        nonlocal previous_status, protocol_retry_pending
+        protocol_retry_pending = False
         event = LockStateEvent(status=status, previous_status=previous_status)
         previous_status = status
 
@@ -84,6 +86,7 @@ async def run_lock_monitor(
             await on_unlocked(event)
 
     while True:
+        stop_monitor = False
         if cycle_event_handler is not None:
             await cycle_event_handler("cycle_started", None)
         try:
@@ -94,6 +97,17 @@ async def run_lock_monitor(
                 connection_lost_handler=on_connection_lost,
                 connection_event_handler=connection_event_handler,
             )
+        except SesameProtocolError as exc:
+            if on_connection_lost is not None:
+                await on_connection_lost()
+            if cycle_event_handler is not None:
+                await cycle_event_handler("cycle_protocol_error", exc)
+            if exc.reason == "session_replaced" or protocol_retry_pending:
+                stop_monitor = True
+                if cycle_event_handler is not None:
+                    await cycle_event_handler("cycle_protocol_stopped", exc)
+            else:
+                protocol_retry_pending = True
         except SesameScanTimeout as exc:
             if on_connection_lost is not None:
                 await on_connection_lost()
@@ -107,4 +121,6 @@ async def run_lock_monitor(
         finally:
             if cycle_event_handler is not None:
                 await cycle_event_handler("cycle_finished", None)
+        if stop_monitor:
+            return
         await asyncio.sleep(poll_interval)

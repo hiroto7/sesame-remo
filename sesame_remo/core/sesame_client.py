@@ -43,6 +43,16 @@ class SesameConnectionLost(ConnectionError):
     pass
 
 
+class SesameProtocolError(RuntimeError):
+    def __init__(self, reason: str, *, exception_type: str | None = None) -> None:
+        self.reason = reason
+        self.exception_type = exception_type
+        detail = f"Sesame BLE protocol error: {reason}"
+        if exception_type is not None:
+            detail += f" ({exception_type})"
+        super().__init__(detail)
+
+
 @dataclass(frozen=True)
 class SesameAdvertisement:
     device: BLEDevice
@@ -95,7 +105,8 @@ class SesameOS3Client:
             None
         )
         self._responses: dict[int, asyncio.Future[SesameResponse]] = {}
-        self._fatal_error: BaseException | None = None
+        self._fatal_error: SesameProtocolError | None = None
+        self._session_authenticated = False
 
         if len(self.secret_key) != 16:
             raise ValueError("secret key must be exactly 16 bytes")
@@ -271,6 +282,7 @@ class SesameOS3Client:
             self._mechanism_status_queue = asyncio.Queue()
             self._responses = {}
             self._fatal_error = None
+            self._session_authenticated = False
             try:
                 await client.start_notify(SESAME_NOTIFY_UUID, self._on_notify)
                 token = await asyncio.wait_for(
@@ -284,8 +296,10 @@ class SesameOS3Client:
                     ItemCode.LOGIN, session_auth[:4]
                 )
                 self._require_success(login, "login")
+                self._session_authenticated = True
                 yield
             finally:
+                self._session_authenticated = False
                 self._mechanism_status_queue = None
                 self._client = None
 
@@ -303,6 +317,8 @@ class SesameOS3Client:
         self, queue: asyncio.Queue[Sesame5MechanismStatus]
     ) -> Sesame5MechanismStatus:
         while True:
+            if self._fatal_error is not None:
+                raise self._fatal_error
             client = self._client
             if client is None or not client.is_connected:
                 raise SesameConnectionLost("Sesame BLE connection was lost")
@@ -332,7 +348,7 @@ class SesameOS3Client:
         self, item_code: ItemCode
     ) -> asyncio.Future[SesameResponse]:
         if self._fatal_error is not None:
-            raise RuntimeError("Sesame BLE protocol failed") from self._fatal_error
+            raise self._fatal_error
         existing = self._responses.get(item_code.value)
         if existing is not None and not existing.done():
             raise RuntimeError(f"command already pending: item_code={item_code.value}")
@@ -375,6 +391,10 @@ class SesameOS3Client:
                     and not self._initial_token.done()
                 ):
                     self._initial_token.set_result(parsed.payload)
+                elif (
+                    parsed.item_code == ItemCode.INITIAL and self._session_authenticated
+                ):
+                    raise SesameProtocolError("session_replaced")
                 elif is_mech_status_publish(parsed.item_code):
                     if self._mechanism_status_queue is not None:
                         self._mechanism_status_queue.put_nowait(
@@ -385,10 +405,19 @@ class SesameOS3Client:
                 future = self._responses.get(parsed.item_code)
                 if future is not None and not future.done():
                     future.set_result(parsed)
-        except Exception as exc:
+        except SesameProtocolError as exc:
             self._fail_pending(exc)
+        except Exception as exc:
+            self._fail_pending(
+                SesameProtocolError(
+                    "notification_processing_failed",
+                    exception_type=type(exc).__name__,
+                )
+            )
 
-    def _fail_pending(self, exc: BaseException) -> None:
+    def _fail_pending(self, exc: SesameProtocolError) -> None:
+        if self._fatal_error is not None:
+            return
         self._fatal_error = exc
         if self._initial_token is not None and not self._initial_token.done():
             self._initial_token.set_exception(exc)
