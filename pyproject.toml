@@ -14,10 +14,10 @@ sesame-remo = "sesame_remo.cli:main"
 
 [dependency-groups]
 dev = [
-  "basedpyright>=1.31",
+  "basedpyright>=1.39.10",
   "pytest>=8",
   "pytest-asyncio>=0.23",
-  "ruff>=0.15.22",
+  "ruff>=0.16.3",
 ]
 
 [build-system]
