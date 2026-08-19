@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import plistlib
 import re
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 from .automation import load_config
-
 
 DEFAULT_SERVICE_LABEL = "com.example.sesame-remo"
 STANDARD_OUT_PATH = "/tmp/sesame-remo.out.log"

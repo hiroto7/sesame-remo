@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from urllib import error, parse, request
 
 from .config import AppConfig, NatureSignalRef

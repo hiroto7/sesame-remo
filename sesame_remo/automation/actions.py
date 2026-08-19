@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
-from datetime import datetime, timezone
-from functools import partial
 import json
 import sys
+from collections.abc import Callable
+from datetime import UTC, datetime
+from functools import partial
 
 from ..core.monitor import LockStateEvent
 from ..core.sesame_client import SesameProtocolError
@@ -50,7 +50,7 @@ class SesameRemoActions:
         print(
             json.dumps(
                 {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "event": event,
                     **fields,
                 },

@@ -1,6 +1,6 @@
 import asyncio
-from typing import cast
 import uuid
+from typing import cast
 
 import pytest
 from bleak import BleakClient

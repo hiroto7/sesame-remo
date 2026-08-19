@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
-
+from dataclasses import dataclass
 
 MECH_STATUS_ITEM_CODE = 81
 

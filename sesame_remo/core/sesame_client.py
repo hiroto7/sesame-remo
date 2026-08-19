@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncIterator
-import uuid
+from typing import TYPE_CHECKING
 
 from .ble_protocol import (
     ItemCode,
+    SegmentType,
     SesameBleReceiver,
     SesamePublish,
     SesameResponse,
-    SegmentType,
     chunks_for_transmit,
     command_payload,
     parse_plain_notify,

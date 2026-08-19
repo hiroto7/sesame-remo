@@ -1,3 +1,5 @@
+import pytest
+
 from sesame_remo.core.ble_protocol import (
     SegmentType,
     SesameBleReceiver,
@@ -6,7 +8,6 @@ from sesame_remo.core.ble_protocol import (
     parse_plain_notify,
 )
 from sesame_remo.core.crypto import counter_bytes
-import pytest
 
 
 def test_chunks_for_transmit_single_plain_segment() -> None:

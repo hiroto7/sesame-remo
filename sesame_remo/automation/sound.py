@@ -4,7 +4,6 @@ import asyncio
 from contextlib import suppress
 from pathlib import Path
 
-
 DEFAULT_SOUND_PATH = "/System/Library/Sounds/Ping.aiff"
 DEFAULT_VOLUME = 0.25
 DEFAULT_REPEAT_GAP = 1.0
