@@ -1,6 +1,6 @@
-from pathlib import Path
 import asyncio
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -225,6 +225,32 @@ async def test_nature_request_does_not_block_sound(monkeypatch, tmp_path: Path) 
         await actions.close()
 
     assert request_finished.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [OSError("offline"), RuntimeError("api failed")])
+async def test_nature_request_logs_expected_failures(
+    tmp_path: Path, capsys, failure: Exception
+) -> None:
+    sound_path = tmp_path / "sound.aiff"
+    sound_path.touch()
+    actions = SesameRemoActions(
+        _config(),
+        sound_path=str(sound_path),
+        volume=0.25,
+        repeat_gap=1,
+    )
+
+    def fail() -> None:
+        raise failure
+
+    await actions._send_nature_request("signal", "signal-id", fail)
+    await actions.close()
+
+    output = capsys.readouterr().out
+    assert '"event": "nature_request_completed"' in output
+    assert '"success": false' in output
+    assert str(failure) in output
 
 
 @pytest.mark.asyncio

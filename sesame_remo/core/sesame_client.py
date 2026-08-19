@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncIterator
-import uuid
+from typing import TYPE_CHECKING
 
 from .ble_protocol import (
     ItemCode,
+    SegmentType,
     SesameBleReceiver,
     SesamePublish,
     SesameResponse,
-    SegmentType,
     chunks_for_transmit,
     command_payload,
     parse_plain_notify,
@@ -211,7 +211,8 @@ class SesameOS3Client:
                     await connection_event_handler("connection_attempt")
                 try:
                     await connection.__aenter__()
-                except Exception:
+                # Backend-specific BLE failures must not stop scanning.
+                except Exception:  # noqa: BLE001
                     # Keep the scanner alive. The next advertisement is the
                     # reconnect trigger, just like the official SDKs.
                     if connection_event_handler is not None:
@@ -395,11 +396,13 @@ class SesameOS3Client:
                     parsed.item_code == ItemCode.INITIAL and self._session_authenticated
                 ):
                     raise SesameProtocolError("session_replaced")
-                elif is_mech_status_publish(parsed.item_code):
-                    if self._mechanism_status_queue is not None:
-                        self._mechanism_status_queue.put_nowait(
-                            Sesame5MechanismStatus(parsed.payload)
-                        )
+                elif (
+                    is_mech_status_publish(parsed.item_code)
+                    and self._mechanism_status_queue is not None
+                ):
+                    self._mechanism_status_queue.put_nowait(
+                        Sesame5MechanismStatus(parsed.payload)
+                    )
                 return
             if isinstance(parsed, SesameResponse):
                 future = self._responses.get(parsed.item_code)
@@ -407,7 +410,8 @@ class SesameOS3Client:
                     future.set_result(parsed)
         except SesameProtocolError as exc:
             self._fail_pending(exc)
-        except Exception as exc:
+        # Convert any malformed notification failure into a protocol error.
+        except Exception as exc:  # noqa: BLE001
             self._fail_pending(
                 SesameProtocolError(
                     "notification_processing_failed",

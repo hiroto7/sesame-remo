@@ -91,24 +91,38 @@ nature_light_appliance_name = "主照明"
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    ("field", "value", "expected_exception"),
     [
-        ("nature_unlock_signals", '[{ appliance = "", signal = "オン" }]'),
+        (
+            "nature_unlock_signals",
+            '[{ appliance = "", signal = "オン" }]',
+            ValueError,
+        ),
         (
             "nature_lock_signals",
             '[{ appliance = "間接照明", signal = "replace-me" }]',
+            ValueError,
         ),
-        ("nature_unlock_signals", '"not-an-array"'),
-        ("nature_unlock_signals", '["not-a-table"]'),
-        ("nature_unlock_signals", '[{ appliance = "間接照明" }]'),
+        ("nature_unlock_signals", '"not-an-array"', TypeError),
+        ("nature_unlock_signals", '["not-a-table"]', TypeError),
+        (
+            "nature_unlock_signals",
+            '[{ appliance = 123, signal = "オン" }]',
+            TypeError,
+        ),
+        ("nature_unlock_signals", '[{ appliance = "間接照明" }]', ValueError),
         (
             "nature_unlock_signals",
             '[{ appliance = "間接照明", signal = "オン", id = "unused" }]',
+            ValueError,
         ),
     ],
 )
 def test_load_config_rejects_invalid_signals(
-    tmp_path: Path, field: str, value: str
+    tmp_path: Path,
+    field: str,
+    value: str,
+    expected_exception: type[Exception],
 ) -> None:
     config = tmp_path / "config.toml"
     config.write_text(
@@ -121,7 +135,7 @@ nature_light_appliance_name = "主照明"
 """.strip()
     )
 
-    with pytest.raises(ValueError, match=field):
+    with pytest.raises(expected_exception, match=field):
         load_config(config)
 
 

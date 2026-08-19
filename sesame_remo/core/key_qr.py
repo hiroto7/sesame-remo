@@ -1,8 +1,7 @@
+import uuid
 from base64 import b64decode
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
-import uuid
-
 
 SESAME5_PRODUCT_TYPES = {5, 7, 16}
 

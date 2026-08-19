@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from urllib import error, parse, request
 
 from .config import AppConfig, NatureSignalRef
@@ -36,26 +36,26 @@ def _json_string(value: object, field: str) -> str:
 
 def _parse_appliances(payload: object) -> tuple[NatureAppliance, ...]:
     if not isinstance(payload, list):
-        raise RuntimeError("Nature Remo API returned an invalid appliance list")
+        raise TypeError("Nature Remo API returned an invalid appliance list")
 
     appliances: list[NatureAppliance] = []
     for appliance_index, value in enumerate(payload):
         if not isinstance(value, dict):
-            raise RuntimeError(
+            raise TypeError(
                 f"Nature Remo API returned an invalid appliance at index {appliance_index}"
             )
         raw_signals = value.get("signals")
         if raw_signals is None:
             raw_signals = []
         if not isinstance(raw_signals, list):
-            raise RuntimeError(
+            raise TypeError(
                 "Nature Remo API returned invalid signals for "
                 f"appliance at index {appliance_index}"
             )
         signals: list[NatureSignal] = []
         for signal_index, raw_signal in enumerate(raw_signals):
             if not isinstance(raw_signal, dict):
-                raise RuntimeError(
+                raise TypeError(
                     "Nature Remo API returned an invalid signal at "
                     f"appliance index {appliance_index}, signal index {signal_index}"
                 )

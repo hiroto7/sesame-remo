@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-import tomllib
 
 from ..core.config import SesameConfig
 
@@ -32,8 +32,10 @@ def _required_string(
 ) -> str:
     label = error_name or name
     value = data.get(name, default)
+    if value is None:
+        raise ValueError(f"{label} must be configured")
     if not isinstance(value, str):
-        raise ValueError(f"{label} must be a string")
+        raise TypeError(f"{label} must be a string")
     cleaned = value.strip()
     if not cleaned or cleaned == "replace-me":
         raise ValueError(f"{label} must be configured")
@@ -45,13 +47,13 @@ def _validated_signals(
 ) -> tuple[NatureSignalRef, ...]:
     values = data.get(name, [])
     if not isinstance(values, list):
-        raise ValueError(f"{name} must be an array of tables")
+        raise TypeError(f"{name} must be an array of tables")
 
     signals: list[NatureSignalRef] = []
     for index, value in enumerate(values):
         item_name = f"{name}[{index}]"
         if not isinstance(value, dict):
-            raise ValueError(f"{item_name} must be a table")
+            raise TypeError(f"{item_name} must be a table")
         if set(value) != {"appliance", "signal"}:
             raise ValueError(f"{item_name} must contain exactly appliance and signal")
         signals.append(

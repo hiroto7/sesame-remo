@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
 import plistlib
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from sesame_remo import macos_service
-
 
 VALID_CONFIG = """\
 sesame_id = "10000000-0000-0000-0000-000000000000"

@@ -4,7 +4,6 @@ import asyncio
 from contextlib import suppress
 from pathlib import Path
 
-
 DEFAULT_SOUND_PATH = "/System/Library/Sounds/Ping.aiff"
 DEFAULT_VOLUME = 0.25
 DEFAULT_REPEAT_GAP = 1.0
@@ -52,33 +51,30 @@ class MacSoundLoop:
             await task
 
     async def _run(self) -> None:
-        try:
-            while True:
-                process = await asyncio.create_subprocess_exec(
-                    "/usr/bin/afplay",
-                    "-v",
-                    str(self.volume),
-                    str(self.sound_path),
-                )
-                self._process = process
+        while True:
+            process = await asyncio.create_subprocess_exec(
+                "/usr/bin/afplay",
+                "-v",
+                str(self.volume),
+                str(self.sound_path),
+            )
+            self._process = process
+            try:
+                await process.wait()
+            finally:
                 try:
-                    await process.wait()
+                    if process.returncode is None:
+                        process.terminate()
+                        with suppress(ProcessLookupError):
+                            try:
+                                await asyncio.wait_for(
+                                    process.wait(),
+                                    timeout=PROCESS_TERMINATE_TIMEOUT,
+                                )
+                            except TimeoutError:
+                                process.kill()
+                                await process.wait()
                 finally:
-                    try:
-                        if process.returncode is None:
-                            process.terminate()
-                            with suppress(ProcessLookupError):
-                                try:
-                                    await asyncio.wait_for(
-                                        process.wait(),
-                                        timeout=PROCESS_TERMINATE_TIMEOUT,
-                                    )
-                                except TimeoutError:
-                                    process.kill()
-                                    await process.wait()
-                    finally:
-                        if self._process is process:
-                            self._process = None
-                await asyncio.sleep(self.repeat_gap)
-        except asyncio.CancelledError:
-            raise
+                    if self._process is process:
+                        self._process = None
+            await asyncio.sleep(self.repeat_gap)

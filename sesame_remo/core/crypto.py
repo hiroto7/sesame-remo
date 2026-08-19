@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from cryptography.hazmat.primitives.cmac import CMAC
 from cryptography.hazmat.primitives.ciphers import algorithms
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
+from cryptography.hazmat.primitives.cmac import CMAC
 
 
 def aes_cmac(key: bytes, data: bytes) -> bytes:

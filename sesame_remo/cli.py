@@ -159,7 +159,8 @@ def main(argv: list[str] | None = None) -> int:
                 return show_macos_service_status(args.label)
     except KeyboardInterrupt:
         return 130
-    except Exception as exc:
+    # Keep a stable CLI error boundary for all ordinary command failures.
+    except Exception as exc:  # noqa: BLE001
         detail = str(exc) or type(exc).__name__
         print(f"error: {detail}", file=sys.stderr)
         return 1
