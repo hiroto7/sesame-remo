@@ -144,7 +144,7 @@ class SesameRemoActions:
     ) -> None:
         try:
             await asyncio.to_thread(operation)
-        except Exception as exc:
+        except (OSError, RuntimeError) as exc:
             self.log_event(
                 "nature_request_completed",
                 request_type=request_type,

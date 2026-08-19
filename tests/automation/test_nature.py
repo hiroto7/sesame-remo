@@ -1,4 +1,5 @@
 import json
+from typing import Self
 from urllib import parse
 
 import pytest
@@ -20,7 +21,7 @@ class FakeResponse:
     def __init__(self, body: bytes = b"") -> None:
         self.body = body
 
-    def __enter__(self) -> "FakeResponse":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -118,20 +119,30 @@ def test_get_appliances_uses_api_and_parses_names(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "body",
+    ("body", "expected_exception"),
     [
-        b"not-json",
-        b"{}",
-        b'[{"id":"id","nickname":"name","type":"IR","signals":{}}]',
-        b'[{"id":"id","nickname":"name","type":"IR","signals":[{}]}]',
+        (b"not-json", RuntimeError),
+        (b"{}", TypeError),
+        (
+            b'[{"id":"id","nickname":"name","type":"IR","signals":{}}]',
+            TypeError,
+        ),
+        (
+            b'[{"id":"id","nickname":"name","type":"IR","signals":[{}]}]',
+            RuntimeError,
+        ),
     ],
 )
-def test_get_appliances_rejects_invalid_responses(monkeypatch, body: bytes) -> None:
+def test_get_appliances_rejects_invalid_responses(
+    monkeypatch, body: bytes, expected_exception: type[Exception]
+) -> None:
     monkeypatch.setattr(
         nature.request, "urlopen", lambda _req, timeout: FakeResponse(body)
     )
 
-    with pytest.raises(RuntimeError, match=r"Nature Remo API returned (an )?invalid"):
+    with pytest.raises(
+        expected_exception, match=r"Nature Remo API returned (an )?invalid"
+    ):
         NatureRemoClient("secret-token").get_appliances()
 
 

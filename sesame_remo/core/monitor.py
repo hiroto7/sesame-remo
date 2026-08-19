@@ -113,7 +113,8 @@ async def run_lock_monitor(
                 await on_connection_lost()
             if cycle_event_handler is not None:
                 await cycle_event_handler("cycle_timeout", exc)
-        except Exception as exc:
+        # A failed monitor cycle must be reported and retried.
+        except Exception as exc:  # noqa: BLE001
             if on_connection_lost is not None:
                 await on_connection_lost()
             if cycle_event_handler is not None:
